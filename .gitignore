@@ -4,3 +4,15 @@ node_modules/
 *.key
 .DS_Store
 Thumbs.db
+
+# Files that hold secrets or local tool settings; never commit these.
+*credentials*
+client_secret*.json
+*token*.json
+.mcp.json
+*.mcp.json
+.mcp.local.json
+.planning/
+STATE.md
+CLAUDE.md
+AGENTS.md
