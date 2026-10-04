@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Takes: a free screen recorder that runs on your own computer</title>
+<!-- build:css -->
+</head>
+<body class="tk-app" id="tk-app">
+
+<a class="tk-skip" id="tk-skip" href="#tk-main">Skip to the recorder</a>
+
+<header class="tk-header" id="tk-header">
+  <div class="tk-brand" id="tk-brand">
+    <h1 class="tk-brand-name"><span class="tk-name">Takes</span></h1>
+    <p class="tk-tagline" id="tk-tagline">Record your screen. Keep your money.</p>
+  </div>
+  <nav class="tk-nav" id="tk-nav" aria-label="Sections">
+    <button type="button" class="tk-nav-btn tk-is-active" id="tk-nav-record" data-view="record" aria-current="page">Record</button>
+    <button type="button" class="tk-nav-btn" id="tk-nav-library" data-view="library">Library</button>
+    <button type="button" class="tk-nav-btn" id="tk-nav-about" data-view="about">About</button>
+  </nav>
+  <button type="button" class="tk-theme-btn" id="tk-theme-btn" aria-label="Switch to light mode">
+    <svg class="tk-theme-icon tk-theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg>
+    <svg class="tk-theme-icon tk-theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+  </button>
+</header>
+
+<div class="tk-banner" id="tk-banner" role="alert" hidden>
+  <p class="tk-banner-text" id="tk-banner-text"></p>
+  <a class="tk-banner-link" id="tk-banner-link" href="https://takes.guessandclick.net" target="_blank" rel="noopener" hidden>Open the hosted link</a>
+</div>
+
+<main class="tk-main" id="tk-main" tabindex="-1">
+
+  <!-- ============================================================ Record view -->
+  <section class="tk-view tk-view-record" id="tk-view-record" aria-labelledby="tk-record-title">
+    <h2 class="tk-view-title tk-sr-only" id="tk-record-title">Record</h2>
+
+    <section class="tk-guide" id="tk-guide" aria-labelledby="tk-guide-title">
+      <h3 class="tk-guide-title" id="tk-guide-title">Three steps, about a minute</h3>
+      <ol class="tk-guide-steps" id="tk-guide-steps">
+        <li class="tk-guide-step"><span class="tk-guide-num" aria-hidden="true">1</span><span class="tk-guide-text">Pick what to record</span></li>
+        <li class="tk-guide-step"><span class="tk-guide-num" aria-hidden="true">2</span><span class="tk-guide-text">Press Record</span></li>
+        <li class="tk-guide-step"><span class="tk-guide-num" aria-hidden="true">3</span><span class="tk-guide-text">Trim, caption, save</span></li>
+      </ol>
+      <button type="button" class="tk-btn tk-btn-ghost" id="tk-guide-dismiss">Got it</button>
+    </section>
+
+    <div class="tk-record-layout" id="tk-record-layout">
+
+      <form class="tk-panel tk-setup" id="tk-setup" aria-labelledby="tk-setup-title">
+        <h3 class="tk-panel-title" id="tk-setup-title">What to record</h3>
+
+        <fieldset class="tk-fieldset tk-toggle-group" id="tk-sources">
+          <legend class="tk-legend">Sources</legend>
+          <label class="tk-toggle" for="tk-src-screen">
+            <input class="tk-toggle-input" type="checkbox" id="tk-src-screen" name="tk-src-screen" checked>
+            <span class="tk-toggle-label">Screen</span>
+          </label>
+          <label class="tk-toggle" for="tk-src-camera">
+            <input class="tk-toggle-input" type="checkbox" id="tk-src-camera" name="tk-src-camera" checked>
+            <span class="tk-toggle-label">Camera</span>
+          </label>
+          <label class="tk-toggle" for="tk-src-mic">
+            <input class="tk-toggle-input" type="checkbox" id="tk-src-mic" name="tk-src-mic" checked>
+            <span class="tk-toggle-label">Microphone</span>
+          </label>
+        </fieldset>
+
+        <fieldset class="tk-fieldset tk-toggle-group" id="tk-bubble-source">
+          <legend class="tk-legend">Bubble shows</legend>
+          <label class="tk-toggle" for="tk-bubble-camera">
+            <input class="tk-toggle-input" type="radio" id="tk-bubble-camera" name="tk-bubble-source" value="camera" checked>
+            <span class="tk-toggle-label">My camera</span>
+          </label>
+          <label class="tk-toggle" for="tk-bubble-file">
+            <input class="tk-toggle-input" type="radio" id="tk-bubble-file" name="tk-bubble-source" value="file">
+            <span class="tk-toggle-label">A video file</span>
+          </label>
+        </fieldset>
+
+        <div class="tk-field" id="tk-bubble-file-field" hidden>
+          <div class="tk-row" id="tk-bubble-file-row">
+            <input class="tk-sr-only" type="file" id="tk-bubble-file-input" name="tk-bubble-file-input" accept="video/*">
+            <label class="tk-btn" for="tk-bubble-file-input" id="tk-bubble-file-choose">Choose video</label>
+            <label class="tk-switch" for="tk-bubble-sound" id="tk-bubble-sound-wrap">
+              <input class="tk-switch-input" type="checkbox" id="tk-bubble-sound" name="tk-bubble-sound" checked>
+              <span class="tk-switch-label">Include the video's sound</span>
+            </label>
+          </div>
+          <p class="tk-note" id="tk-bubble-file-name" role="status">No video chosen yet</p>
+          <p class="tk-note" id="tk-bubble-file-note">The video plays in the bubble from the start of your recording and repeats if it is shorter.</p>
+        </div>
+
+        <div class="tk-field" id="tk-camera-field">
+          <label class="tk-label" for="tk-camera-select">Camera</label>
+          <select class="tk-select" id="tk-camera-select" name="tk-camera-select">
+            <option value="">Default camera</option>
+          </select>
+        </div>
+
+        <div class="tk-field" id="tk-mic-field">
+          <label class="tk-label" for="tk-mic-select">Microphone</label>
+          <select class="tk-select" id="tk-mic-select" name="tk-mic-select">
+            <option value="">Default microphone</option>
+          </select>
+        </div>
+
+        <fieldset class="tk-fieldset tk-toggle-group" id="tk-bubble-shape">
+          <legend class="tk-legend">Bubble shape</legend>
+          <label class="tk-toggle" for="tk-bubble-shape-circle">
+            <input class="tk-toggle-input" type="radio" id="tk-bubble-shape-circle" name="tk-bubble-shape" value="circle" checked>
+            <span class="tk-toggle-label">Circle</span>
+          </label>
+          <label class="tk-toggle" for="tk-bubble-shape-rect">
+            <input class="tk-toggle-input" type="radio" id="tk-bubble-shape-rect" name="tk-bubble-shape" value="rectangle">
+            <span class="tk-toggle-label">Rectangle</span>
+          </label>
+        </fieldset>
+
+        <fieldset class="tk-fieldset tk-corner-group" id="tk-corners">
+          <legend class="tk-legend">Camera bubble corner</legend>
+          <label class="tk-corner" for="tk-corner-tl">
+            <input class="tk-corner-input" type="radio" id="tk-corner-tl" name="tk-bubble-corner" value="top-left">
+            <span class="tk-corner-label">Top left</span>
+          </label>
+          <label class="tk-corner" for="tk-corner-tr">
+            <input class="tk-corner-input" type="radio" id="tk-corner-tr" name="tk-bubble-corner" value="top-right">
+            <span class="tk-corner-label">Top right</span>
+          </label>
+          <label class="tk-corner" for="tk-corner-bl">
+            <input class="tk-corner-input" type="radio" id="tk-corner-bl" name="tk-bubble-corner" value="bottom-left" checked>
+            <span class="tk-corner-label">Bottom left</span>
+          </label>
+          <label class="tk-corner" for="tk-corner-br">
+            <input class="tk-corner-input" type="radio" id="tk-corner-br" name="tk-bubble-corner" value="bottom-right">
+            <span class="tk-corner-label">Bottom right</span>
+          </label>
+        </fieldset>
+
+        <p class="tk-note" id="tk-setup-note" hidden></p>
+      </form>
+
+      <div class="tk-record-stage" id="tk-record-stage">
+        <div class="tk-hero" id="tk-hero">
+          <p class="tk-hero-line" id="tk-hero-line">Record your screen.<br><em>Keep your money.</em></p>
+          <p class="tk-hero-sub" id="tk-hero-sub">A free Loom replacement. One file. Nothing uploaded.</p>
+        </div>
+        <button type="button" class="tk-record-btn" id="tk-record-btn" aria-describedby="tk-record-hint">
+          <svg class="tk-rings" viewBox="0 0 536 536" aria-hidden="true"><circle cx="268" cy="268" r="111"/><circle cx="268" cy="268" r="124"/><circle cx="268" cy="268" r="137"/><circle cx="268" cy="268" r="150"/><circle cx="268" cy="268" r="163"/><circle cx="268" cy="268" r="176"/><circle cx="268" cy="268" r="189"/></svg>
+          <span class="tk-record-dot" aria-hidden="true"></span>
+          <span class="tk-record-label" id="tk-record-label">Record</span>
+        </button>
+        <p class="tk-record-hint" id="tk-record-hint">Your browser asks what to share. Recording starts after a 3-second countdown.</p>
+        <p class="tk-record-hint" id="tk-record-live" role="status" hidden>Recording. Switch to what you want to show. Come back to this tab, or use your browser's Stop sharing bar, to finish.</p>
+
+        <div class="tk-countdown" id="tk-countdown" role="status" aria-live="assertive" hidden>
+          <span class="tk-sr-only">Recording starts in</span>
+          <span class="tk-countdown-num" id="tk-countdown-num">3</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============================================================ Recording bar -->
+  <section class="tk-recbar" id="tk-recbar" aria-label="Recording controls" hidden>
+    <span class="tk-recbar-dot" id="tk-recbar-dot" aria-hidden="true"></span>
+    <span class="tk-recbar-status" id="tk-rec-status" role="status" aria-live="polite">Recording</span>
+    <span class="tk-recbar-timer" id="tk-rec-timer" role="timer" aria-label="Recording time">0:00</span>
+    <div class="tk-recbar-actions" id="tk-recbar-actions">
+      <button type="button" class="tk-btn" id="tk-pause-btn">Pause</button>
+      <button type="button" class="tk-btn" id="tk-resume-btn" hidden>Resume</button>
+      <button type="button" class="tk-btn tk-btn-primary" id="tk-stop-btn">Stop</button>
+    </div>
+  </section>
+
+  <!-- ============================================================ Review view -->
+  <section class="tk-view tk-view-review" id="tk-view-review" aria-labelledby="tk-review-title" hidden>
+    <div class="tk-review-head" id="tk-review-head">
+      <h2 class="tk-view-title" id="tk-review-title">Your recording</h2>
+      <div class="tk-field tk-review-name-field">
+        <label class="tk-label" for="tk-review-name">Name</label>
+        <input class="tk-input" type="text" id="tk-review-name" name="tk-review-name" autocomplete="off" spellcheck="false" maxlength="120">
+      </div>
+      <button type="button" class="tk-btn tk-btn-ghost" id="tk-review-new">New recording</button>
+    </div>
+
+    <p class="tk-savings" id="tk-savings-line">Loom Business is $18 a month. This was free.</p>
+
+    <div class="tk-review-layout" id="tk-review-layout">
+
+      <div class="tk-review-main" id="tk-review-main">
+        <div class="tk-player-wrap" id="tk-player-wrap">
+          <video class="tk-player" id="tk-player" controls playsinline preload="metadata" aria-label="Recording preview"></video>
+        </div>
+
+        <!-- Trim and cut -->
+        <section class="tk-panel tk-trim" id="tk-trim" aria-labelledby="tk-trim-title">
+          <h3 class="tk-panel-title" id="tk-trim-title">Trim</h3>
+
+          <div class="tk-trim-bar" id="tk-trim-bar">
+            <div class="tk-trim-kept" id="tk-trim-kept" aria-hidden="true"></div>
+            <div class="tk-trim-cut" id="tk-trim-cut" aria-hidden="true" hidden></div>
+            <div class="tk-trim-playhead" id="tk-trim-playhead" aria-hidden="true"></div>
+            <label class="tk-sr-only" for="tk-trim-start">Trim start</label>
+            <input class="tk-trim-handle tk-trim-handle-start" type="range" id="tk-trim-start" name="tk-trim-start" min="0" max="0" step="0.1" value="0">
+            <label class="tk-sr-only" for="tk-trim-end">Trim end</label>
+            <input class="tk-trim-handle tk-trim-handle-end" type="range" id="tk-trim-end" name="tk-trim-end" min="0" max="0" step="0.1" value="0">
+          </div>
+
+          <div class="tk-trim-times" id="tk-trim-times">
+            <span class="tk-time-pair">Starts at <output class="tk-time" id="tk-trim-start-time" for="tk-trim-start">0:00</output></span>
+            <span class="tk-time-pair">Ends at <output class="tk-time" id="tk-trim-end-time" for="tk-trim-end">0:00</output></span>
+            <span class="tk-time-pair">Length <output class="tk-time" id="tk-trim-length" for="tk-trim-start tk-trim-end">0:00</output></span>
+            <button type="button" class="tk-btn tk-btn-ghost" id="tk-trim-reset">Reset trim</button>
+          </div>
+          <p class="tk-note" id="tk-trim-note" hidden>The saved file starts and ends within a split second of your handles.</p>
+
+          <div class="tk-cut" id="tk-cut">
+            <button type="button" class="tk-btn" id="tk-cut-toggle" aria-expanded="false" aria-controls="tk-cut-controls">Cut a section</button>
+            <div class="tk-cut-controls" id="tk-cut-controls" hidden>
+              <div class="tk-field">
+                <label class="tk-label" for="tk-cut-start">Cut from <output class="tk-time" id="tk-cut-start-time" for="tk-cut-start">0:00</output></label>
+                <input class="tk-range" type="range" id="tk-cut-start" name="tk-cut-start" min="0" max="0" step="0.1" value="0">
+              </div>
+              <div class="tk-field">
+                <label class="tk-label" for="tk-cut-end">Cut to <output class="tk-time" id="tk-cut-end-time" for="tk-cut-end">0:00</output></label>
+                <input class="tk-range" type="range" id="tk-cut-end" name="tk-cut-end" min="0" max="0" step="0.1" value="0">
+              </div>
+              <div class="tk-row" id="tk-cut-actions">
+                <button type="button" class="tk-btn tk-btn-primary" id="tk-cut-apply">Apply cut</button>
+                <button type="button" class="tk-btn tk-btn-ghost" id="tk-cut-clear">Remove cut</button>
+              </div>
+            </div>
+            <p class="tk-note" id="tk-cut-note" hidden>The cut is removed from the saved file too.</p>
+          </div>
+        </section>
+      </div>
+
+      <div class="tk-review-side" id="tk-review-side">
+
+        <!-- Save -->
+        <section class="tk-panel tk-save" id="tk-save" aria-labelledby="tk-save-title">
+          <h3 class="tk-panel-title" id="tk-save-title">Save</h3>
+          <fieldset class="tk-fieldset" id="tk-save-options">
+            <legend class="tk-legend">Save options</legend>
+            <label class="tk-switch" for="tk-opt-burn" id="tk-opt-burn-wrap">
+              <input class="tk-switch-input" type="checkbox" id="tk-opt-burn" name="tk-opt-burn" aria-describedby="tk-opt-burn-note" disabled>
+              <span class="tk-switch-label">Burn captions into the video</span>
+            </label>
+            <p class="tk-note" id="tk-opt-burn-note">Add captions first to use this.</p>
+            <div class="tk-toggle-group" id="tk-opt-size" role="radiogroup" aria-label="Video shape" aria-describedby="tk-opt-size-note">
+              <label class="tk-toggle" for="tk-opt-size-original">
+                <input class="tk-toggle-input" type="radio" id="tk-opt-size-original" name="tk-opt-size" value="original" checked>
+                <span class="tk-toggle-label">Original</span>
+              </label>
+              <label class="tk-toggle" for="tk-opt-size-vertical">
+                <input class="tk-toggle-input" type="radio" id="tk-opt-size-vertical" name="tk-opt-size" value="vertical">
+                <span class="tk-toggle-label">Vertical (9:16)</span>
+              </label>
+            </div>
+            <p class="tk-note" id="tk-opt-size-note">Vertical fits your whole screen into a tall frame for Reels, Shorts and TikTok. Captions sit underneath.</p>
+            <p class="tk-note" id="tk-opt-slow-note" hidden>Saving with these options takes a few seconds per minute of video.</p>
+          </fieldset>
+          <div class="tk-save-actions" id="tk-save-actions">
+            <button type="button" class="tk-btn tk-btn-primary" id="tk-save-download">Download</button>
+            <button type="button" class="tk-btn" id="tk-save-cloud">Save to my cloud folder</button>
+          </div>
+          <div class="tk-cloud" id="tk-cloud">
+            <p class="tk-cloud-folder">Cloud folder: <span class="tk-cloud-folder-name" id="tk-cloud-folder-name">none chosen yet</span></p>
+            <button type="button" class="tk-btn tk-btn-ghost" id="tk-cloud-choose">Choose folder</button>
+            <p class="tk-note" id="tk-cloud-note">A cloud folder is a folder on this computer that syncs to Google Drive, OneDrive, Dropbox or iCloud.</p>
+            <p class="tk-note" id="tk-save-share-note">No share link here. Save into your Drive, OneDrive or Dropbox folder and share from that app.</p>
+          </div>
+          <div class="tk-progress" id="tk-export-progress" role="progressbar" aria-label="Preparing your trimmed recording" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+            <div class="tk-progress-fill" id="tk-export-progress-fill"></div>
+          </div>
+          <p class="tk-progress-text" id="tk-export-status" role="status" aria-live="polite"></p>
+          <p class="tk-note" id="tk-save-note" role="status" aria-live="polite" hidden></p>
+        </section>
+
+        <!-- Captions -->
+        <section class="tk-panel tk-captions" id="tk-captions" aria-labelledby="tk-captions-title">
+          <h3 class="tk-panel-title" id="tk-captions-title">Captions</h3>
+          <p class="tk-note" id="tk-captions-notice">Captions are made on your own computer. Adding them downloads the caption tools, <span class="tk-captions-size" id="tk-captions-size">about 50 to 70 MB</span>, from free public download servers. English only.</p>
+          <p class="tk-note" id="tk-captions-long-warning" hidden>This recording is longer than 5 minutes, so captions will take a while.</p>
+          <div class="tk-captions-actions" id="tk-captions-actions">
+            <button type="button" class="tk-btn tk-btn-primary" id="tk-captions-add">Add captions</button>
+            <label class="tk-switch" for="tk-captions-toggle" id="tk-captions-toggle-wrap" hidden>
+              <input class="tk-switch-input" type="checkbox" id="tk-captions-toggle" name="tk-captions-toggle" checked>
+              <span class="tk-switch-label">Show captions</span>
+            </label>
+          </div>
+          <div class="tk-progress" id="tk-captions-progress" role="progressbar" aria-label="Making captions" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+            <div class="tk-progress-fill" id="tk-captions-progress-fill"></div>
+          </div>
+          <p class="tk-progress-text" id="tk-captions-status" role="status" aria-live="polite"></p>
+          <p class="tk-empty" id="tk-captions-empty" hidden>No speech was found in this recording, so there are no captions to show.</p>
+          <div class="tk-field" id="tk-transcript-tools" hidden>
+            <label class="tk-label" for="tk-transcript-search">Search the transcript</label>
+            <input class="tk-input" type="search" id="tk-transcript-search" name="tk-transcript-search" autocomplete="off" spellcheck="false">
+            <p class="tk-note" id="tk-transcript-count" role="status" aria-live="polite"></p>
+            <p class="tk-note" id="tk-transcript-hint">Click a time to jump to that moment.</p>
+          </div>
+          <ol class="tk-cue-list" id="tk-cue-list" aria-label="Caption lines"></ol>
+          <div class="tk-row" id="tk-transcript-actions">
+            <button type="button" class="tk-btn" id="tk-transcript-copy" hidden>Copy transcript</button>
+            <button type="button" class="tk-btn" id="tk-transcript-txt" hidden>Download text (.txt)</button>
+            <button type="button" class="tk-btn" id="tk-transcript-srt" hidden>Download subtitles (.srt)</button>
+            <button type="button" class="tk-btn" id="tk-captions-download" hidden>Download captions (.vtt)</button>
+          </div>
+          <p class="tk-note" id="tk-captions-file-note">Captions save as a separate file (.vtt). To draw them into the video too, tick &quot;Burn captions into the video&quot; under Save options.</p>
+        </section>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ Library view -->
+  <section class="tk-view tk-view-library" id="tk-view-library" aria-labelledby="tk-library-title" hidden>
+    <h2 class="tk-view-title" id="tk-library-title">Library</h2>
+    <p class="tk-note" id="tk-library-private-note">Your Library lives in this browser on this computer. Nobody else can see it.</p>
+    <p class="tk-note" id="tk-library-note" hidden>This browser is not keeping recordings between visits, so this list lasts only until you close the page. Download anything you want to keep.</p>
+    <ul class="tk-library-list" id="tk-library-list" aria-label="Recent recordings"></ul>
+    <div class="tk-empty" id="tk-library-empty">
+      <p class="tk-empty-text">No recordings yet. Your takes show up here after you record.</p>
+      <button type="button" class="tk-btn tk-btn-primary" id="tk-library-empty-record">Record your first take</button>
+    </div>
+  </section>
+
+  <!-- ============================================================ About view -->
+  <section class="tk-view tk-view-about" id="tk-view-about" aria-labelledby="tk-about-title" hidden>
+    <h2 class="tk-view-title" id="tk-about-title">About <span class="tk-name">Takes</span></h2>
+
+    <div class="tk-about" id="tk-about">
+
+      <section class="tk-panel tk-about-section" id="tk-about-privacy" aria-labelledby="tk-about-privacy-title">
+        <h3 class="tk-panel-title" id="tk-about-privacy-title">Where your recordings go</h3>
+        <p class="tk-about-lead" id="tk-about-privacy-lead"><span class="tk-name">Takes</span> never uploads anything. You choose where your files go.</p>
+        <details class="tk-more" id="tk-about-privacy-more">
+        <summary>The detail</summary>
+        <p class="tk-about-text" id="tk-about-tools">Captions and trimmed export download their tools from free public download servers when you use them. They may download again each time you open the page. The size is shown before the download starts.</p>
+        <p class="tk-about-text" id="tk-about-hosts">Those downloads come from cdn.jsdelivr.net and huggingface.co, which hands the caption model off to its own delivery host, us.aws.cdn.hf.co. Nothing else is contacted.</p>
+        <p class="tk-about-text" id="tk-about-cloud">Saving to a cloud folder writes the file into a folder you pick. Google Drive, OneDrive, Dropbox or iCloud does any uploading from there.</p>
+        </details>
+      </section>
+
+      <section class="tk-panel tk-about-section" id="tk-about-savings" aria-labelledby="tk-about-savings-title">
+        <h3 class="tk-panel-title" id="tk-about-savings-title">What it saves</h3>
+        <p class="tk-about-lead" id="tk-about-savings-line">Loom Business is $18 per user per month, and Business + AI is $24, at monthly billing. That is $216 to $288 a year for one person. <span class="tk-name">Takes</span> is free.</p>
+        <p class="tk-about-text" id="tk-about-savings-source">Prices from <a class="tk-link" id="tk-about-pricing-link" href="https://www.atlassian.com/software/loom/pricing" target="_blank" rel="noopener noreferrer">Loom's own pricing page</a>, checked October 3rd, 2026.</p>
+      </section>
+
+      <section class="tk-panel tk-about-section" id="tk-about-limits" aria-labelledby="tk-about-limits-title">
+        <h3 class="tk-panel-title" id="tk-about-limits-title">Good to know</h3>
+        <ul class="tk-about-list" id="tk-about-limits-list">
+          <li>Works in current Chrome and Edge.</li>
+          <li>Captions are English only.</li>
+          <li>Trimming the start and end, and cutting a section from the middle, both change the saved file. Saving an edited recording takes a few seconds per minute of video.</li>
+          <li>Captions show on the video here and save as a separate .vtt file. To draw them into the video too, tick &quot;Burn captions into the video&quot; under Save options.</li>
+          <li>The camera bubble can show a video file you choose in place of your live camera.</li>
+          <li>The camera bubble can be a circle or a rectangle.</li>
+          <li>The transcript can be searched, copied and saved as text or subtitles.</li>
+          <li>When you save, you can burn the captions into the video and choose a tall 9:16 shape for social posts.</li>
+          <li>The cloud folder gives you a file. You make the share link in Google Drive, OneDrive, Dropbox or iCloud.</li>
+          <li>On a Mac, the system asks for screen recording permission the first time, and Chrome needs a restart after you allow it.</li>
+          <li>Download anything you want to keep. Clearing your browser data removes your Library.</li>
+          <li>Only record what you have the right to record.</li>
+        </ul>
+      </section>
+
+      <section class="tk-panel tk-about-section tk-credits" id="tk-credits" aria-labelledby="tk-credits-title">
+        <h3 class="tk-panel-title" id="tk-credits-title">Credits</h3>
+        <ul class="tk-about-list" id="tk-credits-list">
+          <li id="tk-credit-transformers">Transformers.js, Apache-2.0 license (captions)</li>
+          <li id="tk-credit-whisper">Whisper, MIT license (the caption model)</li>
+          <li id="tk-credit-mediabunny">Mediabunny, MPL-2.0 license (trimmed export)</li>
+          <li id="tk-credit-outfit">Outfit typeface, SIL Open Font License (headings)</li>
+        </ul>
+        <p class="tk-credits-by" id="tk-credits-by">by Guess and Click</p>
+        <p class="tk-about-text">Also online at <a class="tk-link" href="https://takes.guessandclick.net" target="_blank" rel="noopener">takes.guessandclick.net</a></p>
+      </section>
+
+    </div>
+    <p class="tk-note" id="tk-about-warranty"><span class="tk-name">Takes</span> is provided as is, with no warranty.</p>
+  </section>
+
+</main>
+
+<footer class="tk-footer" id="tk-footer">
+  <p class="tk-footer-text"><span class="tk-name">Takes</span> by Guess and Click. No account, no server, no per-seat fee.</p>
+</footer>
+
+<dialog class="tk-dialog" id="tk-confirm" aria-labelledby="tk-confirm-title">
+  <h2 class="tk-dialog-title" id="tk-confirm-title">Delete this recording?</h2>
+  <p class="tk-dialog-text" id="tk-confirm-text">This removes it from your library. Files you already downloaded are not touched.</p>
+  <div class="tk-dialog-actions" id="tk-confirm-actions">
+    <button type="button" class="tk-btn" id="tk-confirm-cancel">Keep it</button>
+    <button type="button" class="tk-btn tk-btn-danger" id="tk-confirm-ok">Delete</button>
+  </div>
+</dialog>
+
+<div class="tk-toasts" id="tk-toasts" role="region" aria-label="Messages" aria-live="polite"></div>
+
+<!-- build:js -->
+</body>
+</html>
