@@ -345,7 +345,14 @@ function fakeLibrary(options = {}) {
     async getPrimaryVideoTrack() { return options.noPicture ? null : { displayWidth: 1920, displayHeight: 1080 }; }
     async computeDuration() { return this.options.source.blob.size === 4 ? (options.outputDuration ?? 35) : (options.sourceDuration ?? 60); }
   }
-  class Quality { constructor(v) { this.value = v; } }
+  // Like the real one: a bare number is a quality LEVEL (0 to 1), and a bitrate goes in as { bitrate }.
+  class Quality {
+    constructor(v) {
+      if (typeof v === 'number') { this.level = v; return; }
+      assert.ok(v && Number.isInteger(v.bitrate) && v.bitrate > 0, 'a bitrate is a positive whole number');
+      this.bitrate = v.bitrate;
+    }
+  }
   class BufferTarget { constructor() { this.buffer = null; } }
   class Mp4OutputFormat {}
   class Output { constructor(o) { this.target = o.target; this.format = o.format; } }
@@ -541,6 +548,11 @@ test('exportEdited: with a cut it re-encodes over the trim range, drops the cut 
     assert.deepEqual(init.trim, { start: 5, end: 50 });
     assert.equal(init.video.codec, 'avc');
     assert.equal(init.audio.codec, 'aac');
+    // 14 bytes over 60 s is next to nothing, so the floor applies. Never a bare number: the library reads that as near-lossless.
+    assert.equal(init.video.bitrate.bitrate, 1500000, 'the picture is given a bitrate, in bits per second');
+    assert.equal(init.video.bitrate.level, undefined, 'and never a quality level');
+    assert.equal(init.audio.bitrate.bitrate, 128000);
+    assert.equal(init.video.quality, undefined);
 
     // The hooks see times counted from the trim start, so the cut of 20 to 30 is 15 to 25 on their clock.
     const v = init.video.process;
@@ -811,6 +823,7 @@ test('exportEdited options: vertical makes a 1080 by 1920 picture with the capti
       const init = fake.calls.inits[0];
       assert.equal(init.video.processedWidth, 1080);
       assert.equal(init.video.processedHeight, 1920);
+      assert.equal(init.video.bitrate.bitrate, 6000000, 'the vertical file is given a bitrate, never a quality level');
       assert.equal(init.audio, undefined, 'with no cut the sound is left alone');
       assert.deepEqual(seen.progress.map((p) => p.pct), [0, 17, 33, 50, 66, 83, 100], 'progress comes from the frames as they pass');
 

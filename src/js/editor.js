@@ -241,6 +241,14 @@
     return err;
   }
 
+  /**
+   * A bitrate in bits per second, in the form the library takes it. A bare number handed to Quality is read
+   * as a quality LEVEL (0 to 1), and a level in the millions means near-lossless, so it is never passed bare.
+   */
+  function bitrateOf(MB, bitsPerSecond) {
+    return new MB.Quality({ bitrate: Math.round(bitsPerSecond) });
+  }
+
   /** The call sequence tested on a real recording, with the trim range passed in. */
   function convert(MB, blob, edits, report) {
     var input = new MB.Input({ formats: MB.ALL_FORMATS, source: new MB.BlobSource(blob) });
@@ -350,8 +358,8 @@
       // Aim for the picture quality the recording already has: its own overall bitrate, within sane limits.
       if (typeof MB.Quality === 'function' && isFinite(sourceDuration) && sourceDuration > 0 && blob.size > 0) {
         var bitsPerSecond = (blob.size * 8) / sourceDuration;
-        video.quality = new MB.Quality(Math.round(hold(bitsPerSecond, 1500000, 12000000)));
-        audio.quality = new MB.Quality(128000);
+        video.bitrate = bitrateOf(MB, Math.round(hold(bitsPerSecond, 1500000, 12000000)));
+        audio.bitrate = bitrateOf(MB, 128000);
       }
 
       output = new MB.Output({ format: new MB.Mp4OutputFormat(), target: new MB.BufferTarget() });
@@ -744,8 +752,8 @@
       }
       if (typeof MB.Quality === 'function') {
         var bitsPerSecond = isFinite(sourceDuration) && sourceDuration > 0 && blob.size > 0 ? (blob.size * 8) / sourceDuration : 4000000;
-        video.quality = new MB.Quality(layout ? VERTICAL_BITRATE : Math.round(hold(bitsPerSecond, 1500000, 12000000)));
-        if (options.audio) options.audio.quality = new MB.Quality(128000);
+        video.bitrate = bitrateOf(MB, layout ? VERTICAL_BITRATE : Math.round(hold(bitsPerSecond, 1500000, 12000000)));
+        if (options.audio) options.audio.bitrate = bitrateOf(MB, 128000);
       }
       output = new MB.Output({ format: new MB.Mp4OutputFormat(), target: new MB.BufferTarget() });
       options.output = output;

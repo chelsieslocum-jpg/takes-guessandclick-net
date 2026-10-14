@@ -11,7 +11,8 @@
 
   var COUNTDOWN_SECONDS = 3;
   var TIMESLICE_MS = 1000;
-  var VIDEO_BITS_PER_SECOND = 5000000;
+  // 2.5 Mbps keeps 1080p screen text sharp and lands near 28 MB for 90 seconds.
+  var VIDEO_BITS_PER_SECOND = 2500000;
   var AUDIO_BITS_PER_SECOND = 128000;
   // If the browser never reports that the recorder stopped, finish with what has arrived.
   var STOP_WATCHDOG_MS = 15000;

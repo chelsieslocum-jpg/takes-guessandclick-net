@@ -254,7 +254,7 @@ test('start: counts down 3, 2, 1, signals 0, waits for the repaint, then records
   const mr = h.made[0];
   assert.deepEqual(mr.calls, [['start', 1000]]);
   assert.equal(mr.options.mimeType, MP4_FULL);
-  assert.equal(mr.options.videoBitsPerSecond, 5000000);
+  assert.equal(mr.options.videoBitsPerSecond, 2500000);
   assert.equal(mr.options.audioBitsPerSecond, 128000);
   assert.deepEqual(mr.stream.tracks.map((tr) => tr.id), ['v1', 'a1'], 'one stream: the video track plus the audio track');
 
