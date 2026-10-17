@@ -19,6 +19,8 @@
   var NOTE_EXTRA = 24;
   // Extra height for the finished views (a title line above one row of buttons).
   var DONE_EXTRA = 44;
+  // More height for the download's answer under those buttons: up to three short lines.
+  var MSG_EXTRA = 56;
   // Space beside the bubble map, and room for its hint line and gaps.
   var PAD_SIDE = 24;
   var PAD_HINT = 40;
@@ -27,6 +29,8 @@
   // A take shorter than this is not kept (the same rule ui.js applies).
   var SHORT_MS = 1000;
   var DEFAULT_ASPECT = 16 / 9;
+  // Presses inside the window that let it be resized.
+  var GESTURES = ['pointerdown', 'pointerup', 'keydown'];
 
   var LIVE_STATES = { countdown: true, recording: true, paused: true };
   var STATE_CLASSES = {
@@ -51,11 +55,17 @@
   };
   var MSG_READY = 'Your take is ready';
   var MSG_SHORT = 'That recording was under a second, so it was not kept.';
-  var MSG_FAILED = 'The recording could not be saved. Go back to Takes to try again.';
+  var MSG_FAILED = 'The recording could not be saved. Go back to ' + NAME + ' to try again.';
   var MSG_WHOLE = 'Whole screen shared: this bar shows in the video.';
+  // The short form of MSG_WHOLE that sits in the bar's own row, so it shows even if the window cannot grow.
+  var WHOLE_MARK = 'Whole screen';
   var MSG_SAVING = 'Saving your take…';
-  var MSG_NO_DOWNLOAD = 'The download did not start. Go back to Takes to try again.';
+  var MSG_NO_DOWNLOAD = 'The download did not start. Go back to ' + NAME + ' to try again.';
+  var MSG_WHERE = 'Look in your Downloads folder.';
   var PAD_LABEL = 'Camera bubble position';
+  var MOVE_LABEL = 'Move bubble';
+  // The row is tighter with the whole-screen mark in it, so the button's visible word gets shorter.
+  var MOVE_SHORT = 'Bubble';
 
   // ---------------------------------------------------------------- live state
 
@@ -73,11 +83,15 @@
   var lastState = 'idle';  // the recorder state last seen, to tell an empty take from a cancelled countdown
   var lastSecondsLeft;
   var gotDone = false;     // record:done arrived for the take on screen
-  var extra = 0;           // height added to the window on top of the bar, in CSS pixels
+  var extra = 0;           // height the current view wants on top of the bar, in CSS pixels
   var fitting = false;     // a fresh or reused window is being sized as a whole, so setExtra only records
+  var needsFit = null;     // a resize the browser refused, to try again on the next press: 'bar' | 'keep' | null
+  var onGesture = null;    // the press listener on the window's document
+  var carryFocus = false;  // focus was in the bar when it switched to "Finishing", so the next view takes it
   var busy = false;        // a download asked for from this window has not answered yet
   var generation = 0;      // goes up on every close, so a window that arrives late is closed again
   var pending = null;      // the open that is waiting for the browser
+  var pendingTicket = -1;  // the generation that open began in
 
   // ---------------------------------------------------------------- small helpers
 
@@ -195,51 +209,61 @@
     return px;
   }
 
-  /** Grow or shrink the window so it has px of height on top of the bar. A refused resize changes nothing. */
-  function setExtra(px) {
-    var delta = px - extra;
-    if (fitting) { extra = px; return; }   // fitWindow sets the whole size once the view is known
-    if (!win || delta === 0 || typeof win.resizeTo !== 'function') return;
-    var w = Number(win.outerWidth);
-    var h = Number(win.outerHeight);
-    if (!isFinite(w) || !(w > 0)) w = Number(win.innerWidth);
-    if (!isFinite(h) || !(h > 0)) h = Number(win.innerHeight);
-    if (!isFinite(w) || !(w > 0)) w = BAR_SIZE.width;
-    if (!isFinite(h) || !(h > 0)) h = BAR_SIZE.height + extra;
-    try {
-      win.resizeTo(Math.round(w), Math.round(h + delta));
-      extra = px;
-    } catch (err) { /* resizing needs a click; without one the window keeps its size */ }
-  }
-
   /**
-   * Size the window to exactly what the current view needs. Chrome and Edge reopen the
-   * Picture-in-Picture window at the size it last had (a take with the map open leaves it big) and
-   * ignore the size requestWindow asked for, so this runs as soon as a window is attached or reused,
-   * still inside the click. resizeTo sets the OUTER size, so the browser's own frame is added on.
-   * A refused resize (the click's permission has run out) is silent: the CSS fits a bigger window.
+   * Size the window so its page is the bar plus `extra` tall. With barWidth the width goes back to the
+   * bar's too; without it the person's own width is kept. resizeTo sets the OUTER size, so the
+   * browser's own frame is added on.
+   * Chrome and Edge reopen the Picture-in-Picture window at the size it last had and ignore the size
+   * requestWindow asked for, so a window is fitted as soon as it is attached or reused.
+   * The browser only allows a resize shortly after a click or key press. A refused resize is silent
+   * (the CSS copes with a bigger window) and is tried again on the next press inside the window.
    */
-  function fitWindow() {
+  function fitWindow(barWidth) {
     if (!win || typeof win.resizeTo !== 'function') return;
-    var wantW = BAR_SIZE.width;
-    var wantH = BAR_SIZE.height + extra;
     var ow = Number(win.outerWidth);
     var oh = Number(win.outerHeight);
     var iw = Number(win.innerWidth);
     var ih = Number(win.innerHeight);
-    if (!(isFinite(ow) && isFinite(oh) && isFinite(iw) && isFinite(ih))) return;
-    if (!(iw > 0 && ih > 0 && ow >= iw && oh >= ih)) return;
-    if (Math.round(iw) === wantW && Math.round(ih) === wantH) return;
-    try {
-      win.resizeTo(Math.round(ow - iw + wantW), Math.round(oh - ih + wantH));
-    } catch (err) { /* no click left to resize with; the bar's CSS handles the bigger window */ }
+    if (!(ih > 0 && oh >= ih)) return;          // no usable height to work from
+    var wantH = Math.round(oh - ih + BAR_SIZE.height + extra);
+    var wantW;
+    if (barWidth) {
+      if (!(iw > 0 && ow >= iw)) return;
+      wantW = Math.round(ow - iw + BAR_SIZE.width);
+    } else {
+      if (!(ow > 0)) return;
+      wantW = Math.round(ow);
+    }
+    if (wantW !== Math.round(ow) || wantH !== Math.round(oh)) {
+      try {
+        win.resizeTo(wantW, wantH);
+      } catch (err) {
+        // No recent click to resize with. A bar-width fit still owed is kept over a height-only one.
+        needsFit = barWidth || needsFit === 'bar' ? 'bar' : 'keep';
+        return;
+      }
+    }
+    if (barWidth || needsFit !== 'bar') needsFit = null;
+  }
+
+  /** Grow or shrink the window so it has px of height on top of the bar, keeping its width. */
+  function setExtra(px) {
+    if (px === extra && !needsFit) return;
+    extra = px;
+    if (fitting) return;                         // syncAndFit sizes the whole window once the view is known
+    fitWindow(needsFit === 'bar');
+  }
+
+  /** A click or key press inside the window allows a resize, so finish one the browser refused earlier. */
+  function retryFit() {
+    if (needsFit) fitWindow(needsFit === 'bar');
   }
 
   /** Show the view that matches the recorder, then size the whole window to it in one step. */
   function syncAndFit() {
     fitting = true;
     try { syncToState(); } finally { fitting = false; }
-    fitWindow();
+    fitWindow(true);
   }
 
   // ---------------------------------------------------------------- the bubble map
@@ -344,11 +368,25 @@
     u.timer = make('span', 'tk-floater-timer', '0:00');
     u.timer.setAttribute('role', 'timer');
     u.timer.setAttribute('aria-label', 'Recording time');
+    // The timer with the whole-screen mark under it. The mark shows the short words and gives screen
+    // readers the full sentence; the note line under the bar (which a window too short for it hides)
+    // is for the eye only, so the sentence is never read twice.
+    u.clock = make('span', 'tk-floater-clock');
+    u.whole = make('span', 'tk-floater-whole');
+    u.whole.setAttribute('title', MSG_WHOLE);
+    u.wholeShort = make('span', 'tk-floater-whole-short', WHOLE_MARK);
+    u.wholeShort.setAttribute('aria-hidden', 'true');
+    u.whole.appendChild(u.wholeShort);
+    u.whole.appendChild(make('span', 'tk-sr-only', MSG_WHOLE));
+    u.whole.hidden = true;
+    u.clock.appendChild(u.timer);
+    u.clock.appendChild(u.whole);
     u.actions = make('div', 'tk-floater-actions');
     u.pauseBtn = button('tk-btn tk-floater-pause', 'Pause', function () { hook('pause'); });
     u.resumeBtn = button('tk-btn tk-floater-resume', 'Resume', function () { hook('resume'); });
     u.stopBtn = button('tk-btn tk-btn-primary tk-floater-stop', 'Stop', function () { hook('stop'); });
-    u.moveBtn = button('tk-btn tk-floater-move', 'Move bubble', onMoveClick);
+    u.moveBtn = button('tk-btn tk-floater-move', MOVE_LABEL, onMoveClick);
+    u.moveBtn.setAttribute('aria-label', MOVE_LABEL);
     u.moveBtn.setAttribute('aria-expanded', 'false');
     u.moveBtn.setAttribute('aria-controls', 'tk-floater-pad');
     u.actions.appendChild(u.pauseBtn);
@@ -357,12 +395,13 @@
     u.actions.appendChild(u.moveBtn);
     u.head.appendChild(u.dot);
     u.head.appendChild(u.status);
-    u.head.appendChild(u.timer);
+    u.head.appendChild(u.clock);
     u.head.appendChild(u.actions);
     u.padBox = make('div', 'tk-floater-pad');
     u.padBox.id = 'tk-floater-pad';
     u.padBox.hidden = true;
     u.note = make('p', 'tk-floater-note', MSG_WHOLE);
+    u.note.setAttribute('aria-hidden', 'true');
     u.note.hidden = true;
     u.live.appendChild(u.head);
     u.live.appendChild(u.padBox);
@@ -429,8 +468,17 @@
     }
   }
 
+  /** True when a control inside the bar has the keyboard focus (not just the page itself). */
+  function focusInBar() {
+    var a = null;
+    try { a = doc.activeElement; } catch (err) { a = null; /* no focus to read */ }
+    return !!a && a !== doc.body && a !== doc.documentElement;
+  }
+
   function showView(name) {
     if (!ui) return;
+    // Read focus before the old view hides, because hiding a focused button drops its focus.
+    var hadFocus = focusInBar();
     if (name !== 'live') collapsePad();
     view = name;
     for (var key in ui.views) {
@@ -440,12 +488,21 @@
     setTitle(TITLES[name] || NAME);
     if (name === 'done' || name === 'short' || name === 'failed') {
       setStateClass(null);
-      if (name === 'done') ui.msg.textContent = '';
+      if (name === 'done') setMsg('', '');
       setExtra(DONE_EXTRA);
+      // Someone working the bar by keyboard lands on the next thing to do, not on the page.
+      if (hadFocus || carryFocus) {
+        var target = name === 'done' ? ui.downloadBtn : name === 'short' ? ui.shortClose : ui.failedClose;
+        try { target.focus(); } catch (err) { /* focus is a nicety */ }
+      }
+      carryFocus = false;
     } else if (name === 'processing') {
+      // "Finishing" has no buttons, so remember the focus for the view that follows it.
+      if (hadFocus) carryFocus = true;
       setStateClass('processing');
       setExtra(0);
     } else {
+      carryFocus = false;
       setExtra(liveExtra());
     }
   }
@@ -462,6 +519,8 @@
     var whole = !!(hooks && hooks.wholeScreen);
     try { ui.head.setAttribute('title', whole ? text + '. ' + MSG_WHOLE : text); } catch (err) { /* tooltip only */ }
     setHidden(ui.note, !whole);
+    setHidden(ui.whole, !whole);
+    ui.moveBtn.textContent = whole ? MOVE_SHORT : MOVE_LABEL;
 
     // Pause and Resume trade places; Pause only works while recording.
     var hadFocus = doc.activeElement;
@@ -531,8 +590,8 @@
     gotDone = true;
     busy = false;
     var ms = Number(payload && payload.durationMs);
+    if (ui) ui.downloadBtn.disabled = false;   // before the view shows, so it can take the focus
     showView(ms >= SHORT_MS ? 'done' : 'short');
-    if (ui) ui.downloadBtn.disabled = false;
   }
 
   function onMoved(pos) {
@@ -540,11 +599,26 @@
     try { if (typeof pad.setPos === 'function') pad.setPos(pos); } catch (err) { /* keeps its spot */ }
   }
 
+  /**
+   * The download's answer under the buttons: main, then (when given) where to look on its own line,
+   * so a long file name can never push the instruction out of sight.
+   */
+  function setMsg(main, where) {
+    var m = ui.msg;
+    while (m.firstChild) m.removeChild(m.firstChild);
+    if (main) m.appendChild(make('span', 'tk-floater-msg-main', main));
+    // The leading space keeps the two parts apart for screen readers and copied text.
+    if (where) m.appendChild(make('span', 'tk-floater-msg-where', ' ' + where));
+  }
+
   function onDownloadClick() {
     if (busy || !ui) return;
+    // This click allows a resize, and the answer needs room: a window that stayed small when the take
+    // ended (Stop pressed on the browser's own sharing bar) grows now, with space for the message.
+    setExtra(DONE_EXTRA + MSG_EXTRA);
     busy = true;
     ui.downloadBtn.disabled = true;
-    ui.msg.textContent = MSG_SAVING;
+    setMsg(MSG_SAVING, '');
     var result;
     try {
       result = typeof hooks.download === 'function' ? hooks.download() : null;
@@ -559,9 +633,9 @@
     if (!ui) return;
     ui.downloadBtn.disabled = false;
     var name = typeof result === 'string' ? result : result && typeof result.name === 'string' ? result.name : '';
-    if (name) ui.msg.textContent = 'Downloaded as ' + name + '. Look in your Downloads folder.';
-    else if (result && typeof result.error === 'string' && result.error) ui.msg.textContent = result.error;
-    else ui.msg.textContent = MSG_NO_DOWNLOAD;
+    if (name) setMsg('Downloaded as ' + name + '.', MSG_WHERE);
+    else if (result && typeof result.error === 'string' && result.error) setMsg(result.error, '');
+    else setMsg(MSG_NO_DOWNLOAD, '');
   }
 
   // ---------------------------------------------------------------- open and close
@@ -570,6 +644,8 @@
     win = w;
     doc = w.document;
     extra = 0;
+    needsFit = null;
+    carryFocus = false;
     padOpen = false;
     busy = false;
     view = null;
@@ -578,6 +654,12 @@
     watchTheme();
     onPageHide = function () { teardown(); };
     w.addEventListener('pagehide', onPageHide);
+    // Pointer and key presses allow a resize (pointerup covers touch, where pointerdown does not).
+    // Capture phase, so the window is the right size before the press reaches a button.
+    onGesture = retryFit;
+    for (var g = 0; g < GESTURES.length; g++) {
+      try { doc.addEventListener(GESTURES[g], onGesture, true); } catch (err) { /* resizes then wait for a button */ }
+    }
     timerId = w.setInterval(tick, TIMER_MS);
     unsubs = [
       Takes.bus.on('record:state', onState),
@@ -607,6 +689,12 @@
     }
     try { w.removeEventListener('pagehide', onPageHide); } catch (err) { /* the window is gone */ }
     onPageHide = null;
+    for (var g = 0; g < GESTURES.length; g++) {
+      try { doc.removeEventListener(GESTURES[g], onGesture, true); } catch (err) { /* the window is gone */ }
+    }
+    onGesture = null;
+    needsFit = null;
+    carryFocus = false;
     win = null;
     doc = null;
     ui = null;
@@ -641,7 +729,9 @@
       else { teardown(); attach(existing); }
       return Promise.resolve(true);
     }
-    if (pending) return pending;
+    // A request still on its way is shared, unless close() has since cancelled it: that one closes
+    // its window when it lands, so this click asks for a fresh one.
+    if (pending && pendingTicket === generation) return pending;
     var request;
     try {
       request = dpip.requestWindow({ width: BAR_SIZE.width, height: BAR_SIZE.height });
@@ -650,22 +740,30 @@
       return Promise.resolve(false);
     }
     var ticket = generation;
-    pending = Promise.resolve(request).then(function (w) {
-      pending = null;
+    var p = Promise.resolve(request).then(function (w) {
+      if (pending === p) pending = null;
       if (!w || !w.document) return false;
       if (ticket !== generation) {
-        // close() ran while the browser was opening the window.
-        try { w.close(); } catch (err) { /* already gone */ }
+        // close() ran while the browser was opening the window. A newer open may already have
+        // adopted this same window; that one is kept.
+        if (w !== win) {
+          try { w.close(); } catch (err) { /* already gone */ }
+        }
         return false;
       }
-      attach(w);
+      if (w !== win) {
+        if (win) teardown();
+        attach(w);
+      }
       return true;
     }, function (err) {
-      pending = null;
+      if (pending === p) pending = null;
       warnRefused(err);
       return false;
     });
-    return pending;
+    pending = p;
+    pendingTicket = ticket;
+    return p;
   }
 
   /** Close the window if it is open. Safe to call twice. Never touches the recording. */

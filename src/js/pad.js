@@ -133,7 +133,29 @@
 
   /**
    * Builds a pad inside container, in opts.doc, and returns a handle to drive it.
-   * See the module notes in the plan's pad contract for every option.
+   *
+   * opts:
+   *   doc          the document to build in (required; the main page or a Picture-in-Picture window's)
+   *   aspect       the frame's width / height (default 16 / 9)
+   *   shape        'circle' (default) or 'rectangle'
+   *   size         'small', 'medium' (default) or 'large'
+   *   pos          { x, y }, the bubble's center as fractions of the frame (missing parts are 0.5)
+   *   stream       a MediaStream shown inside the bubble, or null for the plain bubble
+   *   screenStream a MediaStream shown behind the bubble as the frame's background, or null for none
+   *   mirror       true to flip the bubble's video left to right (the screen is never flipped)
+   *   label        the bubble's accessible name (default 'Camera bubble position')
+   *   onMove(pos)  called with every new position while dragging or on each key press, at most once
+   *                per animation frame. It may return a corrected { x, y }, which the pad then shows.
+   *   onSettle(pos) called once when a drag or a key press ends, with the position the pad shows
+   *
+   * The handle:
+   *   setPos(pos)              show the bubble at pos (no onMove call)
+   *   setStream(stream, mirror) swap the bubble's video; mirror is applied when it is a boolean
+   *   setScreen(stream)        swap the background video, or remove it with null
+   *   setAspect(aspect)        change the frame's width / height
+   *   setShape(shape)          'circle' or 'rectangle'
+   *   destroy()                remove the pad and its listeners. The streams' tracks are never stopped:
+   *                            the streams belong to the caller. Safe to call twice.
    */
   function mount(container, opts) {
     var o = opts || {};

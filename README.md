@@ -47,7 +47,7 @@ There are no accounts, no cookies and no tracking.
 
 Many source files in, one file out.
 `node build.mjs` joins `src/` into `dist/takes.html`.
-`node --test` runs the unit tests (331).
+`node --test` runs the unit tests (343).
 There are no dependencies to install.
 It needs Node 22 or newer.
 

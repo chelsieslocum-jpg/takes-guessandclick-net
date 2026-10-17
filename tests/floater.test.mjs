@@ -69,8 +69,17 @@ class FakeDoc {
     this.documentElement.appendChild(this.head);
     this.documentElement.appendChild(this.body);
     this.styleSheets = [];
+    this.listeners = {};
   }
   createElement(tag) { this.created++; return new FakeEl(this, tag); }
+  addEventListener(t, fn, capture) { (this.listeners[t] = this.listeners[t] || []).push({ fn, capture }); }
+  removeEventListener(t, fn, capture) {
+    const l = this.listeners[t] || [];
+    const i = l.findIndex((x) => x.fn === fn && x.capture === capture);
+    if (i !== -1) l.splice(i, 1);
+  }
+  /** A press anywhere in the document (the listeners see it before any button does). */
+  press(t) { (this.listeners[t] || []).slice().forEach((x) => x.fn({ type: t })); }
 }
 
 function all(root) {
@@ -181,6 +190,10 @@ function makeDpip(mode) {
       if (this.mode === 'throw') throw new RangeError('bad size');
       const w = makeWindow();
       if (this.onWindow) this.onWindow(w);
+      if (this.mode === 'late') {
+        // Like a browser: the window only becomes documentPictureInPicture.window when the request lands.
+        return Promise.resolve().then(() => { this.window = w; return w; });
+      }
       this.window = w;
       return Promise.resolve(w);
     }
@@ -415,7 +428,7 @@ test('reuse: a window already open on the page is adopted without a second reque
   assert.equal(foreign.document.body.children.filter((c) => c.tagName === 'P').length, 0, 'old content cleared');
 });
 
-// ------------------------------------------------------------------ the remembered window size (SCOPE ADDITION)
+// ------------------------------------------------------------------ the remembered window size
 
 /** Give a fake window the size Chrome remembers from a take with the map open: 287 x 260 inside a 16 x 36 frame. */
 function rememberedBig(w) {
@@ -532,7 +545,7 @@ test('pad height falls back to the 276-wide frame when the window has no usable 
   assert.equal(w.outerHeight - before, Math.round(276 / (1920 / 1080)) + 40);
 });
 
-// ------------------------------------------------------------------ the live bar (C6.14)
+// ------------------------------------------------------------------ the live bar
 
 function assertSlimBar(d, { pause, resume, move, note }) {
   const buttons = visibleButtons(d);
@@ -540,12 +553,14 @@ function assertSlimBar(d, { pause, resume, move, note }) {
   if (pause) expected.push('Pause');
   if (resume) expected.push('Resume');
   expected.push('Stop');
-  if (move) expected.push('Move bubble');
+  // With the whole-screen mark in the row, the button's visible word is shorter; its name is not.
+  if (move) expected.push(note ? 'Bubble' : 'Move bubble');
   assert.deepEqual(buttons, expected);
-  // The only visible text is the timer (and the one-line note for a whole-screen share).
+  if (move) assert.equal(one(d, 'tk-floater-move').getAttribute('aria-label'), 'Move bubble');
+  // The only visible text is the timer (and, for a whole-screen share, the mark in the row and the note line).
   const texts = visibleTexts(d);
   const wantTexts = [texts.find((t) => /^\d+:\d\d$/.test(t))];
-  if (note) wantTexts.push('Whole screen shared: this bar shows in the video.');
+  if (note) wantTexts.push('Whole screen', 'Whole screen shared: this bar shows in the video.');
   assert.deepEqual(texts, wantTexts);
   assert.ok(visible(one(d, 'tk-recbar-dot')), 'the dot shows');
   assert.ok(visible(one(d, 'tk-floater-timer')), 'the timer shows');
@@ -793,7 +808,7 @@ test('grid: Stop during the countdown -> idle with no record:done closes the win
   assert.deepEqual(hooks.calls, ['stop']);
 });
 
-test('grid (C6.6): processing -> idle with no record:done -> "could not be saved" with Open in Takes and Close', async () => {
+test('grid: processing -> idle with no record:done -> "could not be saved" with Open in Takes and Close', async () => {
   const hooks = makeHooks();
   const w = await openWith(hooks);
   const d = w.document;
@@ -900,6 +915,204 @@ test('Open in Takes calls the hook', async () => {
   done(3000);
   byClass(d, 'tk-floater-open').find(visible).click();
   assert.deepEqual(hooks.calls, ['openTakes']);
+});
+
+// ------------------------------------------------------------------ resizes the browser refused, tried again on a press
+
+/** Make a fake window refuse resizeTo while w.allowResize is false, the way a browser does long after a click. */
+function refusable(w) {
+  w.allowResize = true;
+  const real = w.resizeTo;
+  w.resizeTo = function (width, height) {
+    if (!this.allowResize) {
+      this.resizes.push('refused');
+      const e = new Error('Not allowed');
+      e.name = 'NotAllowedError';
+      throw e;
+    }
+    return real.call(this, width, height);
+  };
+}
+
+test('whole screen chosen after a long wait in the picker: the refused grow happens on the next press in the bar', async () => {
+  dpip.onWindow = refusable;
+  const w = await openWith(makeHooks({ state: 'countdown' }));
+  const d = w.document;
+  assert.equal(one(d, 'tk-floater-whole').hidden, true, 'no mark before the share is known');
+  // The share picker stayed open long enough that the browser no longer allows a resize.
+  w.allowResize = false;
+  floater.attachRun(makeHooks({ state: 'countdown', layout: LAYOUT, wholeScreen: true }));
+  assert.deepEqual(w.resizes, ['refused']);
+  assert.equal(w.innerHeight, 64, 'the window could not grow for the note line');
+  // The warning still shows, inside the 48px row.
+  const mark = one(d, 'tk-floater-whole');
+  assert.ok(visible(mark));
+  assert.ok(visible(one(d, 'tk-floater-whole-short')));
+  assert.equal(one(d, 'tk-floater-whole-short').textContent, 'Whole screen');
+  assert.equal(mark.getAttribute('title'), 'Whole screen shared: this bar shows in the video.');
+  // Screen readers get the full sentence once, from the mark; the note line is for the eye only.
+  assert.ok(mark.children.some((c) => c.classList.contains('tk-sr-only') && c.textContent === 'Whole screen shared: this bar shows in the video.'));
+  assert.equal(one(d, 'tk-floater-note').getAttribute('aria-hidden'), 'true');
+  assert.ok(one(d, 'tk-floater-head').getAttribute('title').includes('Whole screen shared'));
+  assert.equal(one(d, 'tk-floater-move').textContent, 'Bubble');
+  assert.equal(one(d, 'tk-floater-move').getAttribute('aria-label'), 'Move bubble');
+  // The person presses anywhere in the bar: that press allows the resize.
+  w.allowResize = true;
+  d.press('pointerdown');
+  assert.deepEqual(w.resizes.at(-1), [316, 100 + 24]);
+  assert.equal(w.innerHeight, 64 + 24);
+  const count = w.resizes.length;
+  d.press('pointerup');
+  d.press('keydown');
+  assert.equal(w.resizes.length, count, 'nothing more to do once it fits');
+});
+
+test('a refused fit of a window opened at a remembered size is finished by a key press, width included', async () => {
+  dpip.onWindow = (w) => { rememberedBig(w); refusable(w); w.allowResize = false; };
+  const w = await openWith(makeHooks());
+  assert.deepEqual(w.resizes, ['refused']);
+  emit('recording');
+  w.allowResize = true;
+  w.document.press('keydown');
+  assert.deepEqual(w.resizes.at(-1), [16 + 300, 36 + 64]);
+  assert.equal(w.innerWidth, 300);
+  assert.equal(w.innerHeight, 64);
+});
+
+test('a press while nothing is owed never resizes, and the press listeners go when the window closes', async () => {
+  const w = await openWith(makeHooks());
+  const d = w.document;
+  emit('recording');
+  d.press('pointerdown');
+  d.press('keydown');
+  assert.deepEqual(w.resizes, []);
+  for (const t of ['pointerdown', 'pointerup', 'keydown']) assert.equal(d.listeners[t].length, 1, t);
+  w.close();
+  for (const t of ['pointerdown', 'pointerup', 'keydown']) assert.equal(d.listeners[t].length, 0, t);
+});
+
+test('no whole-screen share: no mark in the row and the full button word', async () => {
+  const d = (await openWith(makeHooks({ layout: LAYOUT }))).document;
+  emit('recording');
+  assert.equal(one(d, 'tk-floater-whole').hidden, true);
+  assert.equal(one(d, 'tk-floater-move').textContent, 'Move bubble');
+});
+
+test('Download grows a window that stayed small when the take ended, with room for a long file name', async () => {
+  const hooks = makeHooks({ downloadResult: { name: 'Take, October 17th, 8:59 PM (2).mp4' } });
+  const w = await openWith(hooks);
+  refusable(w);
+  const d = w.document;
+  emit('recording');
+  // The take ends from the browser's own sharing bar: no press in this window, so it cannot grow.
+  w.allowResize = false;
+  emit('processing');
+  done(3000);
+  emit('idle');
+  assert.equal(currentView(d), 'done');
+  assert.equal(w.innerHeight, 64, 'still the bar height');
+  // The Download click is a press: the window grows for the buttons and the message in that click.
+  w.allowResize = true;
+  one(d, 'tk-floater-download').click();
+  assert.equal(w.innerHeight, 64 + 44 + 56);
+  assert.equal(w.innerWidth, 300);
+  await flush();
+  const msg = one(d, 'tk-floater-msg');
+  assert.equal(msg.textContent, 'Downloaded as Take, October 17th, 8:59 PM (2).mp4. Look in your Downloads folder.');
+  // The instruction is its own line, so a long name can never hide it.
+  assert.equal(one(d, 'tk-floater-msg-main').textContent, 'Downloaded as Take, October 17th, 8:59 PM (2).mp4.');
+  assert.equal(one(d, 'tk-floater-msg-where').textContent, ' Look in your Downloads folder.');
+  // An error answer is one part, with nothing left over from before.
+  hooks.downloadResult = { error: 'A save is already running. Give it a moment, then try again.' };
+  one(d, 'tk-floater-download').click();
+  await flush();
+  assert.equal(msg.textContent, 'A save is already running. Give it a moment, then try again.');
+  assert.equal(byClass(d, 'tk-floater-msg-where').length, 0);
+});
+
+test('a new done view clears the last message and goes back to its own height', async () => {
+  const w = await openWith(makeHooks());
+  const d = w.document;
+  emit('recording'); emit('processing'); done(3000); emit('idle');
+  one(d, 'tk-floater-download').click();
+  await flush();
+  assert.equal(w.innerHeight, 64 + 44 + 56);
+  emit('countdown', 3); emit('recording'); emit('processing'); done(3000); emit('idle');
+  assert.equal(one(d, 'tk-floater-msg').textContent, '');
+  assert.equal(w.innerHeight, 64 + 44);
+});
+
+// ------------------------------------------------------------------ focus when the bar changes view
+
+test('focus: Stop pressed from the keyboard -> "Finishing" -> done puts the focus on Download', async () => {
+  const d = (await openWith(makeHooks())).document;
+  emit('recording');
+  one(d, 'tk-floater-stop').focus();
+  emit('processing');
+  // A browser drops the focus of a button that hides.
+  d.activeElement = d.body;
+  done(3000);
+  assert.equal(d.activeElement, one(d, 'tk-floater-download'));
+});
+
+test('focus: a take under a second puts the focus on Close', async () => {
+  const d = (await openWith(makeHooks())).document;
+  emit('recording');
+  one(d, 'tk-floater-pause').focus();
+  emit('processing');
+  d.activeElement = d.body;
+  done(400);
+  assert.equal(currentView(d), 'short');
+  assert.equal(d.activeElement, byClass(d, 'tk-floater-close').find(visible));
+});
+
+test('focus: a take that could not be saved puts the focus on Close', async () => {
+  const d = (await openWith(makeHooks())).document;
+  emit('recording');
+  one(d, 'tk-floater-stop').focus();
+  emit('processing');
+  d.activeElement = d.body;
+  emit('idle');
+  assert.equal(currentView(d), 'failed');
+  assert.equal(d.activeElement, byClass(d, 'tk-floater-close').find(visible));
+});
+
+test('focus: never taken when it was not in the bar', async () => {
+  const d = (await openWith(makeHooks())).document;
+  emit('recording');
+  emit('processing');
+  done(3000);
+  assert.equal(d.activeElement, null);
+});
+
+// ------------------------------------------------------------------ open again after a cancelled request
+
+test('open right after close while the request is on its way asks for a fresh window', async () => {
+  dpip.mode = 'late';
+  const hooks = makeHooks();
+  const first = floater.open(hooks);
+  floater.close();
+  const second = floater.open(hooks);
+  assert.notEqual(second, first, 'not the cancelled request');
+  assert.equal(dpip.calls.length, 2, 'asked again, inside the same click');
+  assert.equal(await first, false);
+  assert.equal(await second, true);
+  assert.equal(windows[0].closed, true, 'the cancelled window is closed');
+  assert.equal(windows[1].closed, false);
+  assert.equal(dpip.window, windows[1]);
+  assert.equal(floater.isOpen(), true);
+  assert.equal(currentView(windows[1].document), 'live');
+});
+
+test('open after close adopts a window the browser already shows, and the cancelled request leaves it open', async () => {
+  const first = floater.open(makeHooks());
+  floater.close();
+  const second = floater.open(makeHooks());
+  assert.equal(await first, false);
+  assert.equal(await second, true);
+  assert.equal(windows.length, 1);
+  assert.equal(windows[0].closed, false);
+  assert.equal(floater.isOpen(), true);
 });
 
 // ------------------------------------------------------------------ closing

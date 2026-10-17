@@ -915,15 +915,21 @@ body.tk-floater.tk-is-recording { box-shadow: 0 2px 0 var(--tk-accent) inset; }
 .tk-floater-processing, .tk-floater-done, .tk-floater-short, .tk-floater-failed { flex: 1; justify-content: safe center; gap: var(--tk-s1); }
 
 /* The live row: dot, timer, then the buttons pushed to the right. */
-.tk-floater-head { flex: none; display: flex; align-items: center; gap: var(--tk-s2); height: 48px; min-width: 0; }
+.tk-floater-head { flex: none; display: flex; align-items: center; gap: 6px; height: 48px; min-width: 0; }
 .tk-floater-dot { width: 10px; height: 10px; }
 .tk-floater-timer {
   flex: none; min-width: 4ch; font-size: var(--tk-fs-md); font-weight: 700; line-height: 1;
   font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
 }
 .tk-is-countdown .tk-floater-timer, .tk-is-paused .tk-floater-timer { color: var(--tk-muted); }
+/* The timer, with the short whole-screen mark under it when the whole screen is shared (28px of the 48px row). */
+.tk-floater-clock { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.tk-floater-whole {
+  font-size: 0.6875rem; font-weight: 700; line-height: 12px; white-space: nowrap; color: var(--tk-accent);
+}
 .tk-floater-actions { display: flex; align-items: center; gap: var(--tk-s1); min-width: 0; }
-.tk-floater-head .tk-floater-actions { flex: 1; justify-content: flex-end; margin-left: var(--tk-s1); }
+/* The tight gaps leave room for "Resume", the widest of Pause and Resume, beside a full "Move bubble". */
+.tk-floater-head .tk-floater-actions { flex: 1; justify-content: flex-end; }
 
 /* Compact buttons. Block display so a label that cannot fit ends in an ellipsis instead of pushing the row wider. */
 body.tk-floater .tk-btn {
@@ -933,6 +939,7 @@ body.tk-floater .tk-btn {
 }
 /* Pause, Resume and Stop never shrink; "Move bubble" gives way first. */
 .tk-floater-head .tk-btn { flex: 0 0 auto; }
+body.tk-floater .tk-floater-head .tk-btn { padding: 0 7px; }
 .tk-floater-head .tk-floater-move { flex: 0 1 auto; }
 .tk-floater-move[aria-expanded="true"] { border-color: var(--tk-accent); color: var(--tk-text); background: var(--tk-accent-soft); }
 /* In the finished views the buttons share one row equally. */
@@ -945,11 +952,14 @@ body.tk-floater .tk-btn {
 body.tk-floater .tk-pad { gap: var(--tk-s1); }
 body.tk-floater .tk-pad-hint { font-size: var(--tk-fs-xs); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* The whole-screen note: one short line in the 24px the window adds for it. The full sentence is also the row's tooltip. */
+/* The whole-screen note: one short line in the 24px the window adds for it. The full sentence is also the row's
+   tooltip, and the short mark in the row shows even when the window could not grow to fit this line. */
 .tk-floater-note {
   flex: none; color: var(--tk-muted); font-size: calc(var(--tk-fs-xs) * 0.85); line-height: 16px; text-align: center;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* In a window that could not grow for it, the note is hidden instead of showing half a line; the mark in the row still shows. */
+@media (max-height: 80px) { .tk-floater-note { display: none; } }
 
 .tk-floater-title {
   font-size: var(--tk-fs-sm); font-weight: 700; line-height: 1.25; text-align: center;
@@ -962,11 +972,15 @@ body.tk-floater .tk-pad-hint { font-size: var(--tk-fs-xs); line-height: 16px; wh
   border: 2px solid var(--tk-accent); border-right-color: transparent; border-radius: 50%;
   animation: tk-spin 800ms linear infinite;
 }
-.tk-floater-msg {
-  color: var(--tk-muted); font-size: var(--tk-fs-xs); line-height: 1.3; text-align: center; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
-}
+/* The download's answer: at most three 16px lines in the 56px the window adds for it on the Download click.
+   A file name gets two lines and "Look in your Downloads folder." always keeps its own third line. */
+.tk-floater-msg { color: var(--tk-muted); font-size: var(--tk-fs-xs); line-height: 16px; text-align: center; overflow-wrap: anywhere; }
 .tk-floater-msg:empty { display: none; }
+.tk-floater-msg-main {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
+.tk-floater-msg-main:not(:last-child) { -webkit-line-clamp: 2; line-clamp: 2; }
+.tk-floater-msg-where { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (prefers-reduced-motion: reduce) {
   body.tk-floater .tk-floater-dot, .tk-floater-processing .tk-floater-title::before { animation: none; }
