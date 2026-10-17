@@ -121,6 +121,87 @@
     return { x: x, y: y, w: w, h: h, radius: Math.max(1, Math.round(h * RECT_RADIUS_SHARE)) };
   }
 
+  /** A fraction from a position part: a finite number is kept, anything else is 0.5. Pure. */
+  function posPart(value) {
+    return typeof value === 'number' && isFinite(value) ? value : 0.5;
+  }
+
+  /** True when pos is an object whose x and y are both finite numbers. Pure. */
+  function isPos(pos) {
+    return !!pos && typeof pos === 'object' &&
+      typeof pos.x === 'number' && isFinite(pos.x) &&
+      typeof pos.y === 'number' && isFinite(pos.y);
+  }
+
+  /** The center of a box (either shape) as fractions of the canvas width and height. Pure. */
+  function centerOf(box, canvasW, canvasH) {
+    var w = box.d !== undefined ? box.d : box.w;
+    var h = box.d !== undefined ? box.d : box.h;
+    return { x: (box.x + w / 2) / canvasW, y: (box.y + h / 2) / canvasH };
+  }
+
+  /** value held between lo and hi; lo wins when the range is empty. Pure. */
+  function clampTo(value, lo, hi) {
+    return Math.max(lo, Math.min(hi, value));
+  }
+
+  /**
+   * Where the camera frame sits when its center is placed anywhere on the canvas. Pure.
+   * size and shape mean exactly what they mean to bubbleBox, and the frame is the same size a
+   * corner frame would be.
+   * pos: { x, y }, the frame's CENTER as fractions of the canvas width and height. A missing or
+   * non-finite part is 0.5; values outside 0..1 are allowed and clamped.
+   * The frame is placed with its center at (pos.x * width, pos.y * height), rounded to whole pixels,
+   * then the whole frame is held inside the canvas with the same margin a corner frame keeps.
+   * Returns what bubbleBox returns for that shape: circle { x, y, d, cx, cy, r }, rectangle
+   * { x, y, w, h, radius }.
+   */
+  function bubbleAt(canvasW, canvasH, size, shape, pos) {
+    var cw = wholeNumber(canvasW, 2);
+    var ch = wholeNumber(canvasH, 2);
+    var p = pos && typeof pos === 'object' ? pos : {};
+    var fx = posPart(p.x);
+    var fy = posPart(p.y);
+    // The top-left circle gives the margin, with bubbleRect's zero-margin fallback for tiny canvases.
+    var margin = bubbleRect(cw, ch, 'top-left', size).x;
+    var base = bubbleBox(cw, ch, 'top-left', size, shape);
+    var w = base.d !== undefined ? base.d : base.w;
+    var h = base.d !== undefined ? base.d : base.h;
+
+    var x = clampTo(Math.round(fx * cw - w / 2), margin, cw - margin - w);
+    var y = clampTo(Math.round(fy * ch - h / 2), margin, ch - margin - h);
+
+    if (base.d !== undefined) {
+      var r = base.d / 2;
+      return { x: x, y: y, d: base.d, cx: x + r, cy: y + r, r: r };
+    }
+    return { x: x, y: y, w: base.w, h: base.h, radius: base.radius };
+  }
+
+  /**
+   * The center of a corner frame as fractions of the canvas width and height. Pure.
+   * Arguments mean what they mean to bubbleBox. Placing a frame at this position with bubbleAt
+   * gives exactly bubbleBox(canvasW, canvasH, corner, size, shape).
+   * Returns { x, y }.
+   */
+  function cornerPos(canvasW, canvasH, corner, size, shape) {
+    var cw = wholeNumber(canvasW, 2);
+    var ch = wholeNumber(canvasH, 2);
+    return centerOf(bubbleBox(cw, ch, corner, size, shape), cw, ch);
+  }
+
+  /**
+   * The position a frame really ends up at once bubbleAt has held it inside the canvas. Pure.
+   * Arguments mean what they mean to bubbleAt. Returns { x, y }, the center of
+   * bubbleAt(canvasW, canvasH, size, shape, pos) as fractions of the canvas width and height.
+   * Feeding the result back into bubbleAt gives the same frame.
+   */
+  function clampPos(canvasW, canvasH, size, shape, pos) {
+    var cw = wholeNumber(canvasW, 2);
+    var ch = wholeNumber(canvasH, 2);
+    return centerOf(bubbleAt(cw, ch, size, shape, pos), cw, ch);
+  }
+
   /** The canvas size for a screen of this size: at most 1920 wide, same shape, both sides even. */
   function canvasSize(srcW, srcH) {
     var w = wholeNumber(srcW, 1280);
@@ -374,13 +455,29 @@
         s.ctx = s.canvas.getContext('2d');
         if (!s.ctx || typeof s.canvas.captureStream !== 'function') throw new Error('no canvas capture');
 
-        s.rect = bubbleRect(size.width, size.height, bubble.corner, bubble.size);
-        s.mirror = bubble.mirror !== false;
-        s.ringWidth = Math.max(3, Math.round(s.rect.d * 0.035));
-        s.shape = bubble.shape === 'rectangle' ? 'rectangle' : 'circle';
-        if (s.shape === 'rectangle') {
-          s.box = bubbleBox(size.width, size.height, bubble.corner, bubble.size, 'rectangle');
-          s.ringWidth = Math.max(3, Math.round(s.box.h * 0.035));
+        s.corner = bubble.corner;
+        s.size = bubble.size;
+        s.pos = null;
+        if (isPos(bubble.pos)) {
+          // A free position: the same frame size as a corner, placed where the person put it.
+          s.rect = bubbleAt(size.width, size.height, bubble.size, 'circle', bubble.pos);
+          s.mirror = bubble.mirror !== false;
+          s.ringWidth = Math.max(3, Math.round(s.rect.d * 0.035));
+          s.shape = bubble.shape === 'rectangle' ? 'rectangle' : 'circle';
+          if (s.shape === 'rectangle') {
+            s.box = bubbleAt(size.width, size.height, bubble.size, 'rectangle', bubble.pos);
+            s.ringWidth = Math.max(3, Math.round(s.box.h * 0.035));
+          }
+          s.pos = clampPos(size.width, size.height, bubble.size, s.shape, bubble.pos);
+        } else {
+          s.rect = bubbleRect(size.width, size.height, bubble.corner, bubble.size);
+          s.mirror = bubble.mirror !== false;
+          s.ringWidth = Math.max(3, Math.round(s.rect.d * 0.035));
+          s.shape = bubble.shape === 'rectangle' ? 'rectangle' : 'circle';
+          if (s.shape === 'rectangle') {
+            s.box = bubbleBox(size.width, size.height, bubble.corner, bubble.size, 'rectangle');
+            s.ringWidth = Math.max(3, Math.round(s.box.h * 0.035));
+          }
         }
 
         s.workerUrl = root.URL.createObjectURL(new root.Blob([WORKER_SOURCE], { type: 'text/javascript' }));
@@ -468,6 +565,9 @@
    * bubble.shape: 'circle' (the default, and what anything unknown means) or 'rectangle', a 16:9
    * rounded rectangle as tall as the circle would be wide, in the same corner with the same margin
    * and the same ring. bubbleBox gives its exact place. It has no effect on a passed-through stream.
+   * bubble.pos: optional { x, y }, the frame's center as fractions of the picture's width and height.
+   * When both parts are finite numbers it wins over corner and bubbleAt gives the exact place;
+   * otherwise the corner is used. moveBubble moves it while the take runs.
    */
   function start(options) {
     var opts = options || {};
@@ -506,7 +606,52 @@
     teardown(s);
   }
 
-  var api = { start: start, stop: stop, bubbleRect: bubbleRect, bubbleBox: bubbleBox };
+  /** The running canvas picture's session, or null (nothing running, passed through, or still warming up). */
+  function canvasSession() {
+    var s = session;
+    return s && s.mode === 'canvas' && s.canvas ? s : null;
+  }
+
+  /**
+   * Moves the camera frame of the running canvas picture to pos ({ x, y }, its center as fractions,
+   * read the way bubbleAt reads it). The size and the ring stay as they are.
+   * Returns the position actually used once the frame is held inside the canvas, and emits it as
+   * 'bubble:moved'. Returns null, and changes nothing, when no canvas picture is running.
+   * The next frame drawn shows the move; the new place is swapped in with one assignment.
+   */
+  function moveBubble(pos) {
+    var s = canvasSession();
+    if (!s) return null;
+    var w = s.canvas.width;
+    var h = s.canvas.height;
+    var box = bubbleAt(w, h, s.size, s.shape, pos);
+    if (s.shape === 'rectangle') s.box = box; else s.rect = box;
+    var used = centerOf(box, w, h);
+    s.pos = used;
+    if (Takes && Takes.bus) Takes.bus.emit('bubble:moved', { x: used.x, y: used.y });
+    return { x: used.x, y: used.y };
+  }
+
+  /**
+   * The running canvas picture: { width, height, shape, size, pos, mirror }, where pos is the
+   * frame's center as fractions (the corner's center when the take started on a corner).
+   * null when no canvas picture is running.
+   */
+  function layout() {
+    var s = canvasSession();
+    if (!s) return null;
+    var w = s.canvas.width;
+    var h = s.canvas.height;
+    var pos = s.pos ? { x: s.pos.x, y: s.pos.y } : cornerPos(w, h, s.corner, s.size, s.shape);
+    return { width: w, height: h, shape: s.shape, size: s.size, pos: pos, mirror: s.mirror };
+  }
+
+  var api = {
+    start: start, stop: stop,
+    bubbleRect: bubbleRect, bubbleBox: bubbleBox,
+    bubbleAt: bubbleAt, cornerPos: cornerPos, clampPos: clampPos,
+    moveBubble: moveBubble, layout: layout
+  };
   if (Takes) Takes.compositor = api;
 
   if (typeof module !== 'undefined') module.exports = api;

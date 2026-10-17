@@ -2573,6 +2573,87 @@ button { cursor: pointer; }
     return { x: x, y: y, w: w, h: h, radius: Math.max(1, Math.round(h * RECT_RADIUS_SHARE)) };
   }
 
+  /** A fraction from a position part: a finite number is kept, anything else is 0.5. Pure. */
+  function posPart(value) {
+    return typeof value === 'number' && isFinite(value) ? value : 0.5;
+  }
+
+  /** True when pos is an object whose x and y are both finite numbers. Pure. */
+  function isPos(pos) {
+    return !!pos && typeof pos === 'object' &&
+      typeof pos.x === 'number' && isFinite(pos.x) &&
+      typeof pos.y === 'number' && isFinite(pos.y);
+  }
+
+  /** The center of a box (either shape) as fractions of the canvas width and height. Pure. */
+  function centerOf(box, canvasW, canvasH) {
+    var w = box.d !== undefined ? box.d : box.w;
+    var h = box.d !== undefined ? box.d : box.h;
+    return { x: (box.x + w / 2) / canvasW, y: (box.y + h / 2) / canvasH };
+  }
+
+  /** value held between lo and hi; lo wins when the range is empty. Pure. */
+  function clampTo(value, lo, hi) {
+    return Math.max(lo, Math.min(hi, value));
+  }
+
+  /**
+   * Where the camera frame sits when its center is placed anywhere on the canvas. Pure.
+   * size and shape mean exactly what they mean to bubbleBox, and the frame is the same size a
+   * corner frame would be.
+   * pos: { x, y }, the frame's CENTER as fractions of the canvas width and height. A missing or
+   * non-finite part is 0.5; values outside 0..1 are allowed and clamped.
+   * The frame is placed with its center at (pos.x * width, pos.y * height), rounded to whole pixels,
+   * then the whole frame is held inside the canvas with the same margin a corner frame keeps.
+   * Returns what bubbleBox returns for that shape: circle { x, y, d, cx, cy, r }, rectangle
+   * { x, y, w, h, radius }.
+   */
+  function bubbleAt(canvasW, canvasH, size, shape, pos) {
+    var cw = wholeNumber(canvasW, 2);
+    var ch = wholeNumber(canvasH, 2);
+    var p = pos && typeof pos === 'object' ? pos : {};
+    var fx = posPart(p.x);
+    var fy = posPart(p.y);
+    // The top-left circle gives the margin, with bubbleRect's zero-margin fallback for tiny canvases.
+    var margin = bubbleRect(cw, ch, 'top-left', size).x;
+    var base = bubbleBox(cw, ch, 'top-left', size, shape);
+    var w = base.d !== undefined ? base.d : base.w;
+    var h = base.d !== undefined ? base.d : base.h;
+
+    var x = clampTo(Math.round(fx * cw - w / 2), margin, cw - margin - w);
+    var y = clampTo(Math.round(fy * ch - h / 2), margin, ch - margin - h);
+
+    if (base.d !== undefined) {
+      var r = base.d / 2;
+      return { x: x, y: y, d: base.d, cx: x + r, cy: y + r, r: r };
+    }
+    return { x: x, y: y, w: base.w, h: base.h, radius: base.radius };
+  }
+
+  /**
+   * The center of a corner frame as fractions of the canvas width and height. Pure.
+   * Arguments mean what they mean to bubbleBox. Placing a frame at this position with bubbleAt
+   * gives exactly bubbleBox(canvasW, canvasH, corner, size, shape).
+   * Returns { x, y }.
+   */
+  function cornerPos(canvasW, canvasH, corner, size, shape) {
+    var cw = wholeNumber(canvasW, 2);
+    var ch = wholeNumber(canvasH, 2);
+    return centerOf(bubbleBox(cw, ch, corner, size, shape), cw, ch);
+  }
+
+  /**
+   * The position a frame really ends up at once bubbleAt has held it inside the canvas. Pure.
+   * Arguments mean what they mean to bubbleAt. Returns { x, y }, the center of
+   * bubbleAt(canvasW, canvasH, size, shape, pos) as fractions of the canvas width and height.
+   * Feeding the result back into bubbleAt gives the same frame.
+   */
+  function clampPos(canvasW, canvasH, size, shape, pos) {
+    var cw = wholeNumber(canvasW, 2);
+    var ch = wholeNumber(canvasH, 2);
+    return centerOf(bubbleAt(cw, ch, size, shape, pos), cw, ch);
+  }
+
   /** The canvas size for a screen of this size: at most 1920 wide, same shape, both sides even. */
   function canvasSize(srcW, srcH) {
     var w = wholeNumber(srcW, 1280);
@@ -2826,13 +2907,29 @@ button { cursor: pointer; }
         s.ctx = s.canvas.getContext('2d');
         if (!s.ctx || typeof s.canvas.captureStream !== 'function') throw new Error('no canvas capture');
 
-        s.rect = bubbleRect(size.width, size.height, bubble.corner, bubble.size);
-        s.mirror = bubble.mirror !== false;
-        s.ringWidth = Math.max(3, Math.round(s.rect.d * 0.035));
-        s.shape = bubble.shape === 'rectangle' ? 'rectangle' : 'circle';
-        if (s.shape === 'rectangle') {
-          s.box = bubbleBox(size.width, size.height, bubble.corner, bubble.size, 'rectangle');
-          s.ringWidth = Math.max(3, Math.round(s.box.h * 0.035));
+        s.corner = bubble.corner;
+        s.size = bubble.size;
+        s.pos = null;
+        if (isPos(bubble.pos)) {
+          // A free position: the same frame size as a corner, placed where the person put it.
+          s.rect = bubbleAt(size.width, size.height, bubble.size, 'circle', bubble.pos);
+          s.mirror = bubble.mirror !== false;
+          s.ringWidth = Math.max(3, Math.round(s.rect.d * 0.035));
+          s.shape = bubble.shape === 'rectangle' ? 'rectangle' : 'circle';
+          if (s.shape === 'rectangle') {
+            s.box = bubbleAt(size.width, size.height, bubble.size, 'rectangle', bubble.pos);
+            s.ringWidth = Math.max(3, Math.round(s.box.h * 0.035));
+          }
+          s.pos = clampPos(size.width, size.height, bubble.size, s.shape, bubble.pos);
+        } else {
+          s.rect = bubbleRect(size.width, size.height, bubble.corner, bubble.size);
+          s.mirror = bubble.mirror !== false;
+          s.ringWidth = Math.max(3, Math.round(s.rect.d * 0.035));
+          s.shape = bubble.shape === 'rectangle' ? 'rectangle' : 'circle';
+          if (s.shape === 'rectangle') {
+            s.box = bubbleBox(size.width, size.height, bubble.corner, bubble.size, 'rectangle');
+            s.ringWidth = Math.max(3, Math.round(s.box.h * 0.035));
+          }
         }
 
         s.workerUrl = root.URL.createObjectURL(new root.Blob([WORKER_SOURCE], { type: 'text/javascript' }));
@@ -2920,6 +3017,9 @@ button { cursor: pointer; }
    * bubble.shape: 'circle' (the default, and what anything unknown means) or 'rectangle', a 16:9
    * rounded rectangle as tall as the circle would be wide, in the same corner with the same margin
    * and the same ring. bubbleBox gives its exact place. It has no effect on a passed-through stream.
+   * bubble.pos: optional { x, y }, the frame's center as fractions of the picture's width and height.
+   * When both parts are finite numbers it wins over corner and bubbleAt gives the exact place;
+   * otherwise the corner is used. moveBubble moves it while the take runs.
    */
   function start(options) {
     var opts = options || {};
@@ -2958,7 +3058,52 @@ button { cursor: pointer; }
     teardown(s);
   }
 
-  var api = { start: start, stop: stop, bubbleRect: bubbleRect, bubbleBox: bubbleBox };
+  /** The running canvas picture's session, or null (nothing running, passed through, or still warming up). */
+  function canvasSession() {
+    var s = session;
+    return s && s.mode === 'canvas' && s.canvas ? s : null;
+  }
+
+  /**
+   * Moves the camera frame of the running canvas picture to pos ({ x, y }, its center as fractions,
+   * read the way bubbleAt reads it). The size and the ring stay as they are.
+   * Returns the position actually used once the frame is held inside the canvas, and emits it as
+   * 'bubble:moved'. Returns null, and changes nothing, when no canvas picture is running.
+   * The next frame drawn shows the move; the new place is swapped in with one assignment.
+   */
+  function moveBubble(pos) {
+    var s = canvasSession();
+    if (!s) return null;
+    var w = s.canvas.width;
+    var h = s.canvas.height;
+    var box = bubbleAt(w, h, s.size, s.shape, pos);
+    if (s.shape === 'rectangle') s.box = box; else s.rect = box;
+    var used = centerOf(box, w, h);
+    s.pos = used;
+    if (Takes && Takes.bus) Takes.bus.emit('bubble:moved', { x: used.x, y: used.y });
+    return { x: used.x, y: used.y };
+  }
+
+  /**
+   * The running canvas picture: { width, height, shape, size, pos, mirror }, where pos is the
+   * frame's center as fractions (the corner's center when the take started on a corner).
+   * null when no canvas picture is running.
+   */
+  function layout() {
+    var s = canvasSession();
+    if (!s) return null;
+    var w = s.canvas.width;
+    var h = s.canvas.height;
+    var pos = s.pos ? { x: s.pos.x, y: s.pos.y } : cornerPos(w, h, s.corner, s.size, s.shape);
+    return { width: w, height: h, shape: s.shape, size: s.size, pos: pos, mirror: s.mirror };
+  }
+
+  var api = {
+    start: start, stop: stop,
+    bubbleRect: bubbleRect, bubbleBox: bubbleBox,
+    bubbleAt: bubbleAt, cornerPos: cornerPos, clampPos: clampPos,
+    moveBubble: moveBubble, layout: layout
+  };
   if (Takes) Takes.compositor = api;
 
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -6062,6 +6207,1116 @@ button { cursor: pointer; }
   };
   Takes.captions = api;
 
+})(typeof window !== 'undefined' ? window : globalThis);
+;
+/* takes:pad */
+/*
+ * pad.js: the drag surface for the camera bubble. It is a small map of the recording frame with
+ * a bubble on it that can be dragged with a pointer or moved with the arrow keys. The bubble's
+ * place on the map comes from the compositor's own bubbleAt, so what is shown here is the same
+ * geometry the recording gets. It can be built in any document (the main page or a floating
+ * Picture-in-Picture window), and it only reports positions; the caller decides what they move.
+ */
+(function (root) {
+  'use strict';
+  var Takes = root.Takes;
+
+  var STEP = 0.02;
+  var FINE_STEP = 0.005;
+  var DEFAULT_ASPECT = 16 / 9;
+  var HINT_TEXT = 'Drag the bubble, or use the arrow keys.';
+  var SIZES = ['small', 'medium', 'large'];
+
+  // Gives each pad's hint its own id, so aria-describedby never points at another pad's hint.
+  var hintCount = 0;
+
+  // ---------------------------------------------------------------- pure
+
+  function finite(n) {
+    return typeof n === 'number' && isFinite(n);
+  }
+
+  /** A position with every missing or non-finite part set to the center (0.5). Pure. */
+  function cleanPos(pos) {
+    var p = pos && typeof pos === 'object' ? pos : {};
+    return { x: finite(p.x) ? p.x : 0.5, y: finite(p.y) ? p.y : 0.5 };
+  }
+
+  function validPos(pos) {
+    return !!(pos && typeof pos === 'object' && finite(pos.x) && finite(pos.y));
+  }
+
+  /**
+   * Turns a pointer position into a bubble position. Pure.
+   * padRect: { left, top, width, height } of the pad's frame element, in CSS pixels.
+   * clientX, clientY: the pointer, in the same coordinates.
+   * grab: { dx, dy }, the offset (as fractions of the frame) between the pointer and the bubble's
+   *       center when the drag began, so the bubble does not jump under the pointer. Missing or
+   *       non-finite parts are 0.
+   * Returns { x, y }: the bubble's center as fractions of the frame. It is NOT clamped; the
+   * compositor's bubbleAt keeps the bubble inside the frame. A frame with no width or no height,
+   * or a pointer that is not a number, gives the center { 0.5, 0.5 } for that axis.
+   */
+  function clientToPos(padRect, clientX, clientY, grab) {
+    var r = padRect && typeof padRect === 'object' ? padRect : {};
+    var g = grab && typeof grab === 'object' ? grab : {};
+    var dx = finite(g.dx) ? g.dx : 0;
+    var dy = finite(g.dy) ? g.dy : 0;
+    var left = finite(r.left) ? r.left : 0;
+    var top = finite(r.top) ? r.top : 0;
+    var x = finite(r.width) && r.width > 0 && finite(clientX) ? (clientX - left) / r.width - dx : 0.5;
+    var y = finite(r.height) && r.height > 0 && finite(clientY) ? (clientY - top) / r.height - dy : 0.5;
+    return { x: x, y: y };
+  }
+
+  /**
+   * Moves a bubble position for one key press. Pure.
+   * pos: the current { x, y } (missing parts count as the center).
+   * key: a KeyboardEvent key name. ArrowLeft, ArrowRight, ArrowUp and ArrowDown move 0.02 of the
+   *      frame (0.005 when fine is true, for Alt held). Home gives { 0, 0 } and End gives { 1, 1 };
+   *      the compositor's bubbleAt clamps both into the frame's margins.
+   * Returns the new { x, y }, not clamped, or null for any other key.
+   */
+  function nudge(pos, key, fine) {
+    var p = cleanPos(pos);
+    var step = fine === true ? FINE_STEP : STEP;
+    switch (key) {
+      case 'ArrowLeft': return { x: p.x - step, y: p.y };
+      case 'ArrowRight': return { x: p.x + step, y: p.y };
+      case 'ArrowUp': return { x: p.x, y: p.y - step };
+      case 'ArrowDown': return { x: p.x, y: p.y + step };
+      case 'Home': return { x: 0, y: 0 };
+      case 'End': return { x: 1, y: 1 };
+      default: return null;
+    }
+  }
+
+  // ---------------------------------------------------------------- helpers
+
+  function setClass(node, name, on) {
+    var list = String(node.className || '').split(/\s+/).filter(function (c) { return c && c !== name; });
+    if (on) list.push(name);
+    node.className = list.join(' ');
+  }
+
+  function compositor() {
+    var T = root.Takes || Takes;
+    return T && T.compositor && typeof T.compositor.bubbleAt === 'function' ? T.compositor : null;
+  }
+
+  function makeVideo(doc, className, stream) {
+    var v = doc.createElement('video');
+    v.className = className;
+    try {
+      v.muted = true;
+      v.setAttribute('muted', '');
+      v.playsInline = true;
+      v.setAttribute('playsinline', '');
+      v.autoplay = true;
+      v.setAttribute('autoplay', '');
+      v.setAttribute('aria-hidden', 'true');
+    } catch (err) { /* a minimal element without attributes still plays */ }
+    try { v.srcObject = stream; } catch (err) { /* an unusable stream leaves the placeholder look */ }
+    var playing;
+    try { playing = v.play(); } catch (err) { playing = null; }
+    Promise.resolve(playing).catch(function () {});
+    return v;
+  }
+
+  // Detaches a video this pad made. It never stops the stream's tracks: the stream is not the pad's.
+  function dropVideo(v) {
+    if (!v) return;
+    try { v.pause(); } catch (err) { /* already gone */ }
+    try { v.srcObject = null; } catch (err) { /* already gone */ }
+    try { if (v.parentNode) v.parentNode.removeChild(v); } catch (err) { /* never attached */ }
+  }
+
+  function isInside(node, ancestor) {
+    var n = node;
+    while (n) {
+      if (n === ancestor) return true;
+      n = n.parentNode;
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------- mount
+
+  /**
+   * Builds a pad inside container, in opts.doc, and returns a handle to drive it.
+   * See the module notes in the plan's pad contract for every option.
+   */
+  function mount(container, opts) {
+    var o = opts || {};
+    var doc = o.doc;
+    if (!doc || typeof doc.createElement !== 'function') throw new Error('pad.mount needs opts.doc');
+    var win = doc.defaultView || null;
+
+    var state = {
+      aspect: finite(o.aspect) && o.aspect > 0 ? o.aspect : DEFAULT_ASPECT,
+      shape: o.shape === 'rectangle' ? 'rectangle' : 'circle',
+      size: SIZES.indexOf(o.size) === -1 ? 'medium' : o.size,
+      pos: cleanPos(o.pos),
+      stream: null,
+      mirror: o.mirror === true,
+      screen: null,
+      box: null,
+      frameW: 0,
+      frameH: 0,
+      drag: null,
+      pending: null,
+      rafId: null,
+      destroyed: false
+    };
+    var onMove = typeof o.onMove === 'function' ? o.onMove : null;
+    var onSettle = typeof o.onSettle === 'function' ? o.onSettle : null;
+    var bound = [];
+    var observer = null;
+    var video = null;
+    var screenVideo = null;
+
+    // ---- the tree
+    var pad = doc.createElement('div');
+    pad.className = 'tk-pad';
+    var frame = doc.createElement('div');
+    frame.className = 'tk-pad-frame';
+    var bubble = doc.createElement('button');
+    bubble.className = 'tk-pad-bubble';
+    var hint = doc.createElement('p');
+    hint.className = 'tk-pad-hint';
+    hintCount += 1;
+    hint.id = 'tk-pad-hint-' + hintCount;
+    hint.textContent = HINT_TEXT;
+
+    bubble.setAttribute('type', 'button');
+    try { bubble.type = 'button'; } catch (err) { /* the attribute is enough */ }
+    bubble.setAttribute('aria-label', typeof o.label === 'string' && o.label ? o.label : 'Camera bubble position');
+    bubble.setAttribute('aria-describedby', hint.id);
+
+    frame.appendChild(bubble);
+    pad.appendChild(frame);
+    pad.appendChild(hint);
+
+    function listen(target, type, fn) {
+      if (!target || typeof target.addEventListener !== 'function') return;
+      target.addEventListener(type, fn);
+      bound.push([target, type, fn]);
+    }
+
+    // ---- geometry
+
+    function frameRect() {
+      var r = null;
+      try { r = frame.getBoundingClientRect(); } catch (err) { /* not in a document yet */ }
+      if (!r) r = { left: 0, top: 0, width: frame.clientWidth || 0, height: frame.clientHeight || 0 };
+      return r;
+    }
+
+    function layout() {
+      if (state.destroyed) return;
+      var comp = compositor();
+      var r = frameRect();
+      var w = Math.round(Number(r.width) || 0);
+      var h = Math.round(Number(r.height) || 0);
+      if (!comp || w < 2 || h < 2) return; // hidden or not laid out yet; the next resize lays it out
+      state.frameW = w;
+      state.frameH = h;
+
+      // Hold the position to what the frame can show, so key presses past an edge do not pile up.
+      var lo = comp.bubbleAt(w, h, state.size, state.shape, { x: 0, y: 0 });
+      var hi = comp.bubbleAt(w, h, state.size, state.shape, { x: 1, y: 1 });
+      var bw = state.shape === 'rectangle' ? lo.w : lo.d;
+      var bh = state.shape === 'rectangle' ? lo.h : lo.d;
+      var minX = (lo.x + bw / 2) / w;
+      var maxX = (hi.x + bw / 2) / w;
+      var minY = (lo.y + bh / 2) / h;
+      var maxY = (hi.y + bh / 2) / h;
+      state.pos = {
+        x: Math.min(maxX, Math.max(minX, state.pos.x)),
+        y: Math.min(maxY, Math.max(minY, state.pos.y))
+      };
+
+      var box = comp.bubbleAt(w, h, state.size, state.shape, state.pos);
+      state.box = box;
+      var s = bubble.style;
+      s.left = box.x + 'px';
+      s.top = box.y + 'px';
+      if (state.shape === 'rectangle') {
+        s.width = box.w + 'px';
+        s.height = box.h + 'px';
+        s.borderRadius = box.radius + 'px';
+      } else {
+        s.width = box.d + 'px';
+        s.height = box.d + 'px';
+        s.borderRadius = '';
+      }
+    }
+
+    function boxCenter() {
+      var b = state.box;
+      if (!b || !state.frameW || !state.frameH) return cleanPos(state.pos);
+      var bw = state.shape === 'rectangle' ? b.w : b.d;
+      var bh = state.shape === 'rectangle' ? b.h : b.d;
+      return { x: (b.x + bw / 2) / state.frameW, y: (b.y + bh / 2) / state.frameH };
+    }
+
+    // Sends a position out and shows what comes back (or what was sent).
+    function apply(pos) {
+      var shown = pos;
+      if (onMove) {
+        var back;
+        try { back = onMove({ x: pos.x, y: pos.y }); } catch (err) { back = null; }
+        if (validPos(back)) shown = back;
+      }
+      state.pos = cleanPos(shown);
+      layout();
+    }
+
+    function flush() {
+      state.rafId = null;
+      var p = state.pending;
+      state.pending = null;
+      if (p && !state.destroyed) apply(p);
+    }
+
+    // One onMove per animation frame of the pad's own window; straight through without one.
+    function queue(pos) {
+      state.pending = pos;
+      if (win && typeof win.requestAnimationFrame === 'function') {
+        if (state.rafId === null) {
+          try { state.rafId = win.requestAnimationFrame(flush); } catch (err) { state.rafId = null; flush(); }
+        }
+      } else {
+        flush();
+      }
+    }
+
+    function cancelQueued() {
+      if (state.rafId !== null && win && typeof win.cancelAnimationFrame === 'function') {
+        try { win.cancelAnimationFrame(state.rafId); } catch (err) { /* already ran */ }
+      }
+      state.rafId = null;
+    }
+
+    function settle() {
+      if (onSettle) {
+        try { onSettle({ x: state.pos.x, y: state.pos.y }); } catch (err) { /* the caller's problem, not the drag's */ }
+      }
+    }
+
+    // ---- videos
+
+    function setStream(stream, mirror) {
+      if (state.destroyed) return;
+      if (typeof mirror === 'boolean') state.mirror = mirror;
+      var next = stream || null;
+      if (next !== state.stream) {
+        dropVideo(video);
+        video = null;
+        state.stream = next;
+        if (next) {
+          video = makeVideo(doc, 'tk-pad-video', next);
+          bubble.appendChild(video);
+        }
+      }
+      if (video) video.style.transform = state.mirror ? 'scaleX(-1)' : '';
+    }
+
+    function setScreen(stream) {
+      if (state.destroyed) return;
+      var next = stream || null;
+      if (next === state.screen) return;
+      dropVideo(screenVideo);
+      screenVideo = null;
+      state.screen = next;
+      if (next) {
+        // The shared screen sits behind the bubble, never mirrored.
+        screenVideo = makeVideo(doc, 'tk-pad-screen', next);
+        frame.insertBefore(screenVideo, bubble);
+      }
+    }
+
+    // ---- input
+
+    function endDrag(e) {
+      var d = state.drag;
+      if (!d) return;
+      if (e && finite(e.pointerId) && finite(d.pointerId) && e.pointerId !== d.pointerId) return;
+      state.drag = null;
+      setClass(bubble, 'tk-is-dragging', false);
+      try { frame.releasePointerCapture(d.pointerId); } catch (err) { /* a synthetic pointer has no capture */ }
+      cancelQueued();
+      if (state.pending) flush();
+      settle();
+    }
+
+    function onPointerDown(e) {
+      if (state.destroyed || state.drag) return;
+      if (finite(e.button) && e.button !== 0) return;
+      var r = frameRect();
+      var at = clientToPos(r, e.clientX, e.clientY, null);
+      var grab = { dx: 0, dy: 0 };
+      var onBubble = isInside(e.target, bubble);
+      if (onBubble) {
+        var c = boxCenter();
+        grab = { dx: at.x - c.x, dy: at.y - c.y };
+      }
+      state.drag = { pointerId: e.pointerId, grab: grab };
+      setClass(bubble, 'tk-is-dragging', true);
+      try { frame.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic pointer has no capture */ }
+      try { if (typeof e.preventDefault === 'function') e.preventDefault(); } catch (err) { /* nothing to stop */ }
+      try { if (typeof bubble.focus === 'function') bubble.focus(); } catch (err) { /* focus is a nicety */ }
+      // A press on empty frame space jumps the bubble there.
+      if (!onBubble) queue(at);
+    }
+
+    function onPointerMove(e) {
+      var d = state.drag;
+      if (!d) return;
+      if (finite(e.pointerId) && finite(d.pointerId) && e.pointerId !== d.pointerId) return;
+      queue(clientToPos(frameRect(), e.clientX, e.clientY, d.grab));
+    }
+
+    function onKeyDown(e) {
+      if (state.destroyed) return;
+      var next = nudge(state.pos, e.key, e.altKey === true);
+      if (!next) return;
+      try { if (typeof e.preventDefault === 'function') e.preventDefault(); } catch (err) { /* nothing to stop */ }
+      apply(next);
+    }
+
+    function onKeyUp(e) {
+      if (state.destroyed) return;
+      if (nudge(state.pos, e.key, false)) settle();
+    }
+
+    listen(frame, 'pointerdown', onPointerDown);
+    listen(frame, 'pointermove', onPointerMove);
+    listen(frame, 'pointerup', endDrag);
+    listen(frame, 'pointercancel', endDrag);
+    listen(bubble, 'keydown', onKeyDown);
+    listen(bubble, 'keyup', onKeyUp);
+
+    // ---- size and placement
+
+    try { frame.style.aspectRatio = String(state.aspect); } catch (err) { /* older engines size by width */ }
+    if (state.shape === 'rectangle') setClass(bubble, 'tk-is-rect', true);
+    if (container && typeof container.appendChild === 'function') container.appendChild(pad);
+
+    if (win && typeof win.ResizeObserver === 'function') {
+      try {
+        observer = new win.ResizeObserver(function () { layout(); });
+        observer.observe(frame);
+      } catch (err) { observer = null; }
+    }
+    if (!observer) listen(win, 'resize', layout);
+
+    if (o.stream) setStream(o.stream, o.mirror === true);
+    if (o.screenStream) setScreen(o.screenStream);
+    layout();
+
+    return {
+      setPos: function (pos) {
+        if (state.destroyed) return;
+        state.pos = cleanPos(pos);
+        layout();
+      },
+      setStream: setStream,
+      setScreen: setScreen,
+      setAspect: function (aspect) {
+        if (state.destroyed) return;
+        state.aspect = finite(aspect) && aspect > 0 ? aspect : DEFAULT_ASPECT;
+        try { frame.style.aspectRatio = String(state.aspect); } catch (err) { /* older engines size by width */ }
+        layout();
+      },
+      setShape: function (shape) {
+        if (state.destroyed) return;
+        state.shape = shape === 'rectangle' ? 'rectangle' : 'circle';
+        setClass(bubble, 'tk-is-rect', state.shape === 'rectangle');
+        layout();
+      },
+      destroy: function () {
+        if (state.destroyed) return;
+        state.destroyed = true;
+        cancelQueued();
+        state.pending = null;
+        state.drag = null;
+        for (var i = 0; i < bound.length; i++) {
+          try { bound[i][0].removeEventListener(bound[i][1], bound[i][2]); } catch (err) { /* already gone */ }
+        }
+        bound = [];
+        if (observer) {
+          try { observer.disconnect(); } catch (err) { /* already gone */ }
+          observer = null;
+        }
+        dropVideo(video);
+        dropVideo(screenVideo);
+        video = null;
+        screenVideo = null;
+        state.stream = null;
+        state.screen = null;
+        try { if (pad.parentNode) pad.parentNode.removeChild(pad); } catch (err) { /* never attached */ }
+      }
+    };
+  }
+
+  var api = { clientToPos: clientToPos, nudge: nudge, mount: mount };
+  if (Takes) Takes.pad = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+;
+/* takes:floater */
+/*
+ * floater.js: the small control bar that floats on top of every other window while a take records.
+ * It lives in the browser's Document Picture-in-Picture window (Chrome and Edge, no extension).
+ * By default it is one slim row: the recording dot, the timer, Pause or Resume, Stop, and a
+ * "Move bubble" button when the take has a camera bubble. Pressing "Move bubble" opens a map of the
+ * frame (Takes.pad) under the bar and grows the window; pressing it again shrinks it back.
+ * When the take ends the bar turns into "Your take is ready" with Download and Open in Takes.
+ * Everything it does to the take goes through the hooks ui.js hands it; it never reaches into ui.
+ * Closing the window never stops a recording.
+ */
+(function (root) {
+  'use strict';
+  var Takes = root.Takes;
+
+  // The smallest bar the browser is asked for. Width and height must be passed together.
+  var BAR_SIZE = { width: 300, height: 64 };
+  // Extra height, in CSS pixels, for the one-line whole-screen note under the bar.
+  var NOTE_EXTRA = 24;
+  // Extra height for the finished views (a title line above one row of buttons).
+  var DONE_EXTRA = 44;
+  // Space beside the bubble map, and room for its hint line and gaps.
+  var PAD_SIDE = 24;
+  var PAD_HINT = 40;
+  // The window is visible, so its own timers run at full speed.
+  var TIMER_MS = 250;
+  // A take shorter than this is not kept (the same rule ui.js applies).
+  var SHORT_MS = 1000;
+  var DEFAULT_ASPECT = 16 / 9;
+
+  var LIVE_STATES = { countdown: true, recording: true, paused: true };
+  var STATE_CLASSES = {
+    countdown: 'tk-is-countdown',
+    recording: 'tk-is-recording',
+    paused: 'tk-is-paused',
+    processing: 'tk-is-processing'
+  };
+  var STATUS_TEXT = {
+    countdown: 'Get ready',
+    recording: 'Recording',
+    paused: 'Paused',
+    processing: 'Finishing your recording…'
+  };
+  var NAME = (Takes && Takes.PRODUCT_NAME) || 'Takes';
+  var TITLES = {
+    live: NAME + ' · Recording',
+    processing: NAME + ' · Finishing',
+    done: NAME + ' · Your take is ready',
+    short: NAME,
+    failed: NAME
+  };
+  var MSG_READY = 'Your take is ready';
+  var MSG_SHORT = 'That recording was under a second, so it was not kept.';
+  var MSG_FAILED = 'The recording could not be saved. Go back to Takes to try again.';
+  var MSG_WHOLE = 'Whole screen shared: this bar shows in the video.';
+  var MSG_SAVING = 'Saving your take…';
+  var MSG_NO_DOWNLOAD = 'The download did not start. Go back to Takes to try again.';
+  var PAD_LABEL = 'Camera bubble position';
+
+  // ---------------------------------------------------------------- live state
+
+  var win = null;          // the Picture-in-Picture window this module built in, or null
+  var doc = null;          // its document
+  var hooks = {};          // the current take's hooks from ui.js
+  var ui = null;           // the elements built in doc
+  var pad = null;          // the mounted bubble map, or null
+  var padOpen = false;
+  var timerId = null;
+  var unsubs = [];
+  var observer = null;     // mirrors the opener's theme
+  var onPageHide = null;
+  var view = null;         // 'live' | 'processing' | 'done' | 'short' | 'failed'
+  var lastState = 'idle';  // the recorder state last seen, to tell an empty take from a cancelled countdown
+  var lastSecondsLeft;
+  var gotDone = false;     // record:done arrived for the take on screen
+  var extra = 0;           // height added to the window on top of the bar, in CSS pixels
+  var busy = false;        // a download asked for from this window has not answered yet
+  var generation = 0;      // goes up on every close, so a window that arrives late is closed again
+  var pending = null;      // the open that is waiting for the browser
+
+  // ---------------------------------------------------------------- small helpers
+
+  function hook(name) {
+    var fn = hooks && hooks[name];
+    if (typeof fn !== 'function') return undefined;
+    try { return fn(); } catch (err) { return undefined; /* a hook that fails leaves the bar as it is */ }
+  }
+
+  function readState() {
+    var s = hook('getState');
+    return typeof s === 'string' ? s : 'idle';
+  }
+
+  function readLayout() {
+    var l = hook('getLayout');
+    return l && typeof l === 'object' ? l : null;
+  }
+
+  function aspectOf(layout) {
+    var a = layout ? Number(layout.width) / Number(layout.height) : NaN;
+    return isFinite(a) && a > 0 ? a : DEFAULT_ASPECT;
+  }
+
+  function setHidden(node, hidden) {
+    if (node) node.hidden = !!hidden;
+  }
+
+  function make(tag, cls, text) {
+    var node = doc.createElement(tag);
+    if (cls) node.className = cls;
+    if (text) node.textContent = text;
+    return node;
+  }
+
+  function button(cls, text, onClick) {
+    var b = make('button', cls, text);
+    b.type = 'button';
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function setTitle(text) {
+    try { doc.title = text; } catch (err) { /* a title is a nicety */ }
+  }
+
+  function warnRefused(err) {
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('[' + NAME + '] the floating controls could not open:', err && err.message ? err.message : err);
+    }
+  }
+
+  // ---------------------------------------------------------------- style and theme
+
+  /** The opener's CSS as one string: its single inline style block, or every readable rule. */
+  function styleText() {
+    var od = root.document;
+    if (!od) return '';
+    var blocks = null;
+    try { blocks = od.head ? od.head.getElementsByTagName('style') : null; } catch (err) { blocks = null; /* no head to read */ }
+    if (blocks && blocks.length === 1) return String(blocks[0].textContent || '');
+    var out = [];
+    var sheets = null;
+    try { sheets = od.styleSheets; } catch (err) { sheets = null; /* no style sheets to read */ }
+    var count = sheets && typeof sheets.length === 'number' ? sheets.length : 0;
+    for (var i = 0; i < count; i++) {
+      try {
+        var rules = sheets[i].cssRules;
+        for (var j = 0; j < rules.length; j++) out.push(rules[j].cssText);
+      } catch (err) { /* a sheet from another origin cannot be read; skip it */ }
+    }
+    return out.join('\n');
+  }
+
+  function openerTheme() {
+    try { return root.document.documentElement.getAttribute('data-theme'); } catch (err) { return null; /* no opener document */ }
+  }
+
+  function copyTheme() {
+    if (!doc || !doc.documentElement) return;
+    var theme = openerTheme();
+    try {
+      if (theme) doc.documentElement.setAttribute('data-theme', theme);
+      else doc.documentElement.removeAttribute('data-theme');
+    } catch (err) { /* the window keeps its current theme */ }
+  }
+
+  function watchTheme() {
+    var MO = root.MutationObserver;
+    if (typeof MO !== 'function') return;
+    try {
+      observer = new MO(copyTheme);
+      observer.observe(root.document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    } catch (err) { observer = null; /* the theme is copied once at opening instead */ }
+  }
+
+  // ---------------------------------------------------------------- window size
+
+  function liveExtra() {
+    var px = hooks && hooks.wholeScreen ? NOTE_EXTRA : 0;
+    if (padOpen) {
+      px += Math.round((BAR_SIZE.width - PAD_SIDE) / aspectOf(readLayout())) + PAD_HINT;
+    }
+    return px;
+  }
+
+  /** Grow or shrink the window so it has px of height on top of the bar. A refused resize changes nothing. */
+  function setExtra(px) {
+    var delta = px - extra;
+    if (!win || delta === 0 || typeof win.resizeTo !== 'function') return;
+    var w = Number(win.outerWidth);
+    var h = Number(win.outerHeight);
+    if (!isFinite(w) || !(w > 0)) w = Number(win.innerWidth);
+    if (!isFinite(h) || !(h > 0)) h = Number(win.innerHeight);
+    if (!isFinite(w) || !(w > 0)) w = BAR_SIZE.width;
+    if (!isFinite(h) || !(h > 0)) h = BAR_SIZE.height + extra;
+    try {
+      win.resizeTo(Math.round(w), Math.round(h + delta));
+      extra = px;
+    } catch (err) { /* resizing needs a click; without one the window keeps its size */ }
+  }
+
+  // ---------------------------------------------------------------- the bubble map
+
+  function destroyPad() {
+    if (!pad) return;
+    var p = pad;
+    pad = null;
+    try { p.destroy(); } catch (err) { /* the map is going away anyway */ }
+  }
+
+  function screenFor() {
+    return hooks && !hooks.wholeScreen ? hooks.screenStream || null : null;
+  }
+
+  function expandPad() {
+    var layout = readLayout();
+    var P = Takes && Takes.pad;
+    if (!layout || !P || typeof P.mount !== 'function' || !ui) return;
+    destroyPad();
+    try {
+      pad = P.mount(ui.padBox, {
+        doc: doc,
+        aspect: aspectOf(layout),
+        shape: layout.shape,
+        size: layout.size,
+        pos: layout.pos,
+        stream: hooks.cameraStream || null,
+        screenStream: screenFor(),
+        mirror: !!hooks.mirror,
+        label: PAD_LABEL,
+        onMove: function (pos) {
+          var fn = hooks && hooks.moveBubble;
+          if (typeof fn !== 'function') return undefined;
+          try { return fn(pos) || undefined; } catch (err) { return undefined; /* the map shows what it sent */ }
+        },
+        onSettle: function (pos) {
+          var fn = hooks && hooks.onSettle;
+          if (typeof fn === 'function') {
+            try { fn(pos); } catch (err) { /* saving the spot is a nicety */ }
+          }
+        }
+      });
+    } catch (err) {
+      pad = null;
+    }
+    padOpen = !!pad;
+    setHidden(ui.padBox, !padOpen);
+    ui.moveBtn.setAttribute('aria-expanded', padOpen ? 'true' : 'false');
+    setExtra(liveExtra());
+  }
+
+  function collapsePad() {
+    destroyPad();
+    padOpen = false;
+    if (!ui) return;
+    setHidden(ui.padBox, true);
+    ui.moveBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function onMoveClick() {
+    if (!padOpen) { expandPad(); return; }
+    collapsePad();
+    setExtra(liveExtra());
+  }
+
+  /** Point an open map at the current take's layout and streams. */
+  function refreshPad() {
+    if (!pad) return;
+    var layout = readLayout();
+    if (!layout) { collapsePad(); setExtra(liveExtra()); return; }
+    try { if (typeof pad.setAspect === 'function') pad.setAspect(aspectOf(layout)); } catch (err) { /* keeps its shape */ }
+    try { if (typeof pad.setShape === 'function') pad.setShape(layout.shape); } catch (err) { /* keeps its shape */ }
+    try { if (typeof pad.setStream === 'function') pad.setStream(hooks.cameraStream || null, !!hooks.mirror); } catch (err) { /* keeps its picture */ }
+    try { if (typeof pad.setScreen === 'function') pad.setScreen(screenFor()); } catch (err) { /* keeps its picture */ }
+    try { if (typeof pad.setPos === 'function' && layout.pos) pad.setPos(layout.pos); } catch (err) { /* keeps its spot */ }
+  }
+
+  // ---------------------------------------------------------------- building the views
+
+  function build() {
+    var body = doc.body;
+    while (body.firstChild) body.removeChild(body.firstChild);
+    body.classList.add('tk-floater');
+
+    var css = styleText();
+    if (css && doc.head) {
+      var style = doc.createElement('style');
+      style.textContent = css;
+      doc.head.appendChild(style);
+    }
+
+    var u = {};
+    // live: one slim row, then the map (closed until asked for), then the whole-screen note.
+    u.live = make('section', 'tk-floater-view tk-floater-live');
+    u.head = make('div', 'tk-floater-head');
+    u.dot = make('span', 'tk-recbar-dot tk-floater-dot');
+    u.dot.setAttribute('aria-hidden', 'true');
+    u.status = make('span', 'tk-sr-only tk-floater-status');
+    u.status.setAttribute('role', 'status');
+    u.status.setAttribute('aria-live', 'polite');
+    u.timer = make('span', 'tk-floater-timer', '0:00');
+    u.timer.setAttribute('role', 'timer');
+    u.timer.setAttribute('aria-label', 'Recording time');
+    u.actions = make('div', 'tk-floater-actions');
+    u.pauseBtn = button('tk-btn tk-floater-pause', 'Pause', function () { hook('pause'); });
+    u.resumeBtn = button('tk-btn tk-floater-resume', 'Resume', function () { hook('resume'); });
+    u.stopBtn = button('tk-btn tk-btn-primary tk-floater-stop', 'Stop', function () { hook('stop'); });
+    u.moveBtn = button('tk-btn tk-floater-move', 'Move bubble', onMoveClick);
+    u.moveBtn.setAttribute('aria-expanded', 'false');
+    u.moveBtn.setAttribute('aria-controls', 'tk-floater-pad');
+    u.actions.appendChild(u.pauseBtn);
+    u.actions.appendChild(u.resumeBtn);
+    u.actions.appendChild(u.stopBtn);
+    u.actions.appendChild(u.moveBtn);
+    u.head.appendChild(u.dot);
+    u.head.appendChild(u.status);
+    u.head.appendChild(u.timer);
+    u.head.appendChild(u.actions);
+    u.padBox = make('div', 'tk-floater-pad');
+    u.padBox.id = 'tk-floater-pad';
+    u.padBox.hidden = true;
+    u.note = make('p', 'tk-floater-note', MSG_WHOLE);
+    u.note.hidden = true;
+    u.live.appendChild(u.head);
+    u.live.appendChild(u.padBox);
+    u.live.appendChild(u.note);
+
+    // processing: status only.
+    u.processing = make('section', 'tk-floater-view tk-floater-processing');
+    u.processingText = make('p', 'tk-floater-title', STATUS_TEXT.processing);
+    u.processingText.setAttribute('role', 'status');
+    u.processing.appendChild(u.processingText);
+
+    // done: the title, then Download and Open in Takes on one row, then the download's result.
+    u.done = make('section', 'tk-floater-view tk-floater-done');
+    u.doneTitle = make('p', 'tk-floater-title', MSG_READY);
+    u.doneActions = make('div', 'tk-floater-actions');
+    u.downloadBtn = button('tk-btn tk-btn-primary tk-floater-download', 'Download', onDownloadClick);
+    u.openBtn = button('tk-btn tk-floater-open', 'Open in ' + NAME, function () { hook('openTakes'); });
+    u.doneActions.appendChild(u.downloadBtn);
+    u.doneActions.appendChild(u.openBtn);
+    u.msg = make('p', 'tk-floater-msg');
+    u.msg.setAttribute('role', 'status');
+    u.msg.setAttribute('aria-live', 'polite');
+    u.done.appendChild(u.doneTitle);
+    u.done.appendChild(u.doneActions);
+    u.done.appendChild(u.msg);
+
+    // short: the take was too short to keep.
+    u.short = make('section', 'tk-floater-view tk-floater-short');
+    u.shortText = make('p', 'tk-floater-title', MSG_SHORT);
+    u.shortText.setAttribute('role', 'status');
+    u.shortActions = make('div', 'tk-floater-actions');
+    u.shortClose = button('tk-btn tk-floater-close', 'Close', function () { close(); });
+    u.shortActions.appendChild(u.shortClose);
+    u.short.appendChild(u.shortText);
+    u.short.appendChild(u.shortActions);
+
+    // failed: the recorder finished with nothing to keep.
+    u.failed = make('section', 'tk-floater-view tk-floater-failed');
+    u.failedText = make('p', 'tk-floater-title', MSG_FAILED);
+    u.failedText.setAttribute('role', 'status');
+    u.failedActions = make('div', 'tk-floater-actions');
+    u.failedOpen = button('tk-btn tk-floater-open', 'Open in ' + NAME, function () { hook('openTakes'); });
+    u.failedClose = button('tk-btn tk-floater-close', 'Close', function () { close(); });
+    u.failedActions.appendChild(u.failedOpen);
+    u.failedActions.appendChild(u.failedClose);
+    u.failed.appendChild(u.failedText);
+    u.failed.appendChild(u.failedActions);
+
+    u.views = { live: u.live, processing: u.processing, done: u.done, short: u.short, failed: u.failed };
+    for (var key in u.views) {
+      if (!Object.prototype.hasOwnProperty.call(u.views, key)) continue;
+      u.views[key].hidden = true;
+      body.appendChild(u.views[key]);
+    }
+    ui = u;
+  }
+
+  function setStateClass(look) {
+    var body = doc.body;
+    for (var key in STATE_CLASSES) {
+      if (!Object.prototype.hasOwnProperty.call(STATE_CLASSES, key)) continue;
+      if (key === look) body.classList.add(STATE_CLASSES[key]);
+      else body.classList.remove(STATE_CLASSES[key]);
+    }
+  }
+
+  function showView(name) {
+    if (!ui) return;
+    if (name !== 'live') collapsePad();
+    view = name;
+    for (var key in ui.views) {
+      if (Object.prototype.hasOwnProperty.call(ui.views, key)) setHidden(ui.views[key], key !== name);
+    }
+    try { doc.body.setAttribute('data-view', name); } catch (err) { /* styling hint only */ }
+    setTitle(TITLES[name] || NAME);
+    if (name === 'done' || name === 'short' || name === 'failed') {
+      setStateClass(null);
+      if (name === 'done') ui.msg.textContent = '';
+      setExtra(DONE_EXTRA);
+    } else if (name === 'processing') {
+      setStateClass('processing');
+      setExtra(0);
+    } else {
+      setExtra(liveExtra());
+    }
+  }
+
+  /** The live row for one recorder state. Mirrors the in-page bar's rules. */
+  function renderLive(state, secondsLeft) {
+    if (!ui) return;
+    // Before the recorder starts (the share picker is still open) the bar reads as the countdown.
+    var base = LIVE_STATES[state] ? state : 'countdown';
+    var look = base === 'countdown' && secondsLeft === 0 ? 'recording' : base;
+    setStateClass(look);
+    var text = STATUS_TEXT[look] || '';
+    ui.status.textContent = text;
+    var whole = !!(hooks && hooks.wholeScreen);
+    try { ui.head.setAttribute('title', whole ? text + '. ' + MSG_WHOLE : text); } catch (err) { /* tooltip only */ }
+    setHidden(ui.note, !whole);
+
+    // Pause and Resume trade places; Pause only works while recording.
+    var hadFocus = doc.activeElement;
+    setHidden(ui.pauseBtn, state === 'paused');
+    setHidden(ui.resumeBtn, state !== 'paused');
+    ui.pauseBtn.disabled = state !== 'recording';
+    ui.resumeBtn.disabled = state !== 'paused';
+    ui.stopBtn.disabled = !LIVE_STATES[state];
+    if (state === 'paused' && hadFocus === ui.pauseBtn) ui.resumeBtn.focus();
+    if (state === 'recording' && hadFocus === ui.resumeBtn) ui.pauseBtn.focus();
+
+    var hasBubble = !!readLayout();
+    setHidden(ui.moveBtn, !hasBubble);
+    if (!hasBubble && padOpen) collapsePad();
+    setExtra(liveExtra());
+    tick();
+  }
+
+  function tick() {
+    if (!ui || view !== 'live') return;
+    var formatTime = Takes && Takes.util && Takes.util.formatTime;
+    var secs = Number(hook('elapsed'));
+    ui.timer.textContent = formatTime ? formatTime(secs) : String(Math.floor(secs) || 0);
+  }
+
+  /** Show the view that matches the recorder right now (used when opening and reusing). */
+  function syncToState() {
+    var state = readState();
+    lastState = state;
+    lastSecondsLeft = undefined;
+    if (state === 'processing') { showView('processing'); return; }
+    gotDone = false;
+    showView('live');
+    renderLive(state, undefined);
+  }
+
+  // ---------------------------------------------------------------- events
+
+  function onState(payload) {
+    if (!win) return;
+    var state = payload && typeof payload.state === 'string' ? payload.state : 'idle';
+    var prev = lastState;
+    lastState = state;
+    lastSecondsLeft = payload ? payload.secondsLeft : undefined;
+
+    if (LIVE_STATES[state]) {
+      if (view !== 'live') {
+        // A new take in a window that still shows the last one.
+        gotDone = false;
+        showView('live');
+      }
+      renderLive(state, lastSecondsLeft);
+      return;
+    }
+    if (state === 'processing') {
+      showView('processing');
+      return;
+    }
+    // idle
+    if (gotDone) return;                  // the done or short view stays up
+    if (prev === 'countdown') { close(); return; }   // Stop during the countdown: nothing was recorded
+    if (prev === 'processing' || prev === 'recording' || prev === 'paused') showView('failed');
+  }
+
+  function onDone(payload) {
+    if (!win) return;
+    gotDone = true;
+    busy = false;
+    var ms = Number(payload && payload.durationMs);
+    showView(ms >= SHORT_MS ? 'done' : 'short');
+    if (ui) ui.downloadBtn.disabled = false;
+  }
+
+  function onMoved(pos) {
+    if (!pad || !pos) return;
+    try { if (typeof pad.setPos === 'function') pad.setPos(pos); } catch (err) { /* keeps its spot */ }
+  }
+
+  function onDownloadClick() {
+    if (busy || !ui) return;
+    busy = true;
+    ui.downloadBtn.disabled = true;
+    ui.msg.textContent = MSG_SAVING;
+    var result;
+    try {
+      result = typeof hooks.download === 'function' ? hooks.download() : null;
+    } catch (err) {
+      result = null;
+    }
+    Promise.resolve(result).then(showDownload, function () { showDownload(null); });
+  }
+
+  function showDownload(result) {
+    busy = false;
+    if (!ui) return;
+    ui.downloadBtn.disabled = false;
+    var name = typeof result === 'string' ? result : result && typeof result.name === 'string' ? result.name : '';
+    if (name) ui.msg.textContent = 'Downloaded as ' + name + '. Look in your Downloads folder.';
+    else if (result && typeof result.error === 'string' && result.error) ui.msg.textContent = result.error;
+    else ui.msg.textContent = MSG_NO_DOWNLOAD;
+  }
+
+  // ---------------------------------------------------------------- open and close
+
+  function attach(w) {
+    win = w;
+    doc = w.document;
+    extra = 0;
+    padOpen = false;
+    busy = false;
+    view = null;
+    build();
+    copyTheme();
+    watchTheme();
+    onPageHide = function () { teardown(); };
+    w.addEventListener('pagehide', onPageHide);
+    timerId = w.setInterval(tick, TIMER_MS);
+    unsubs = [
+      Takes.bus.on('record:state', onState),
+      Takes.bus.on('record:done', onDone),
+      Takes.bus.on('bubble:moved', onMoved)
+    ];
+    syncToState();
+  }
+
+  /** Let go of the window: the map, the timer, the listeners. Safe to call twice. */
+  function teardown() {
+    if (!win) return;
+    var w = win;
+    destroyPad();
+    padOpen = false;
+    if (timerId !== null) {
+      try { w.clearInterval(timerId); } catch (err) { /* the window is gone */ }
+      timerId = null;
+    }
+    for (var i = 0; i < unsubs.length; i++) {
+      try { unsubs[i](); } catch (err) { /* already gone */ }
+    }
+    unsubs = [];
+    if (observer) {
+      try { observer.disconnect(); } catch (err) { /* already gone */ }
+      observer = null;
+    }
+    try { w.removeEventListener('pagehide', onPageHide); } catch (err) { /* the window is gone */ }
+    onPageHide = null;
+    win = null;
+    doc = null;
+    ui = null;
+    view = null;
+    busy = false;
+    Takes.bus.emit('floater:closed', {});
+  }
+
+  function supported() {
+    var caps = Takes && Takes.state && Takes.state.caps;
+    var dpip = root.documentPictureInPicture;
+    return !!(caps && caps.docPip) && !!dpip && typeof dpip.requestWindow === 'function';
+  }
+
+  function isOpen() {
+    return !!win;
+  }
+
+  /**
+   * Open the bar (or reuse the one already open) for the take described by h.
+   * Call it straight from a click: the browser's request runs before anything is awaited.
+   * Resolves true when the window is up, false when it is unsupported or refused. Never rejects.
+   */
+  function open(h) {
+    if (h && typeof h === 'object') hooks = h;
+    if (!supported()) return Promise.resolve(false);
+    var dpip = root.documentPictureInPicture;
+    var existing = null;
+    try { existing = dpip.window || null; } catch (err) { existing = null; /* treat as none open */ }
+    if (existing) {
+      if (existing === win) syncToState();
+      else { teardown(); attach(existing); }
+      return Promise.resolve(true);
+    }
+    if (pending) return pending;
+    var request;
+    try {
+      request = dpip.requestWindow({ width: BAR_SIZE.width, height: BAR_SIZE.height });
+    } catch (err) {
+      warnRefused(err);
+      return Promise.resolve(false);
+    }
+    var ticket = generation;
+    pending = Promise.resolve(request).then(function (w) {
+      pending = null;
+      if (!w || !w.document) return false;
+      if (ticket !== generation) {
+        // close() ran while the browser was opening the window.
+        try { w.close(); } catch (err) { /* already gone */ }
+        return false;
+      }
+      attach(w);
+      return true;
+    }, function (err) {
+      pending = null;
+      warnRefused(err);
+      return false;
+    });
+    return pending;
+  }
+
+  /** Close the window if it is open. Safe to call twice. Never touches the recording. */
+  function close() {
+    generation++;
+    var w = win;
+    teardown();
+    if (w) {
+      try { w.close(); } catch (err) { /* already gone */ }
+    }
+  }
+
+  /** Point the open bar at a take's hooks (the streams and the layout arrive after opening). */
+  function attachRun(h) {
+    if (h && typeof h === 'object') hooks = h;
+    if (!win || !ui) return;
+    if (view === 'live') renderLive(lastState, lastSecondsLeft);
+    refreshPad();
+  }
+
+  var api = {
+    supported: supported,
+    isOpen: isOpen,
+    open: open,
+    close: close,
+    attachRun: attachRun
+  };
+  if (Takes) Takes.floater = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 ;
 /* takes:ui */

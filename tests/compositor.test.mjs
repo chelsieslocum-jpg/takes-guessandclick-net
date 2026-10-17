@@ -26,7 +26,8 @@ const margin = (h) => Math.round(h * 0.03);
 
 test('compositor loads under Node and exposes exactly its public methods', () => {
   assert.equal(Takes.compositor, compositor, 'the module attaches itself to Takes');
-  assert.deepEqual(Object.keys(compositor).sort(), ['bubbleBox', 'bubbleRect', 'start', 'stop']);
+  assert.deepEqual(Object.keys(compositor).sort(),
+    ['bubbleAt', 'bubbleBox', 'bubbleRect', 'clampPos', 'cornerPos', 'layout', 'moveBubble', 'start', 'stop']);
   for (const key of Object.keys(compositor)) assert.equal(typeof compositor[key], 'function', key);
 });
 
@@ -350,4 +351,349 @@ test('bubbleBox: the width is held to 40% of the canvas width, and the height sh
   assert.equal(big.h, 432);
   // Unclamped sizes are left alone.
   assert.ok(bubbleBox(1920, 1080, 'top-left', 'large', 'rectangle').w < 768);
+});
+
+// ------------------------------------------------------------------ bubbleAt, cornerPos, clampPos: anywhere on the canvas
+
+const { bubbleAt, cornerPos, clampPos } = compositor;
+const SHAPES = ['circle', 'rectangle'];
+const SIZE_NAMES = ['small', 'medium', 'large'];
+const GRID = [];
+for (let v = -0.5; v <= 1.5 + 1e-9; v += 0.25) GRID.push(Math.round(v * 100) / 100);
+
+// The frame's outer width and height, whichever shape it is.
+const extent = (b) => (b.d !== undefined ? [b.d, b.d] : [b.w, b.h]);
+// The margin a corner frame keeps, including bubbleRect's zero-margin fallback.
+const cornerMargin = (w, h, size) => bubbleRect(w, h, 'top-left', size).x;
+
+test('bubbleAt: every canvas, size, shape and position keeps the frame inside the margins, in whole pixels', () => {
+  for (const [w, h] of CANVASES) {
+    for (const size of SIZE_NAMES) {
+      const m = cornerMargin(w, h, size);
+      for (const shape of SHAPES) {
+        const keys = shape === 'rectangle' ? ['h', 'radius', 'w', 'x', 'y'] : ['cx', 'cy', 'd', 'r', 'x', 'y'];
+        for (const x of GRID) {
+          for (const y of GRID) {
+            const b = bubbleAt(w, h, size, shape, { x, y });
+            const label = `${w}x${h} ${size} ${shape} (${x}, ${y})`;
+            assert.deepEqual(Object.keys(b).sort(), keys, label);
+            for (const key of Object.keys(b)) assert.ok(Number.isInteger(b[key]), `${label}: ${key} = ${b[key]}`);
+            const [bw, bh] = extent(b);
+            assert.ok(b.x >= m, `${label}: left edge`);
+            assert.ok(b.y >= m, `${label}: top edge`);
+            assert.ok(b.x + bw <= w - m, `${label}: right edge`);
+            assert.ok(b.y + bh <= h - m, `${label}: bottom edge`);
+          }
+        }
+      }
+    }
+  }
+});
+
+test('bubbleAt: the frame is the same size as the corner frame, wherever it goes', () => {
+  for (const [w, h] of CANVASES) {
+    for (const size of SIZE_NAMES) {
+      for (const shape of SHAPES) {
+        const corner = bubbleBox(w, h, 'top-left', size, shape);
+        for (const x of GRID) {
+          const b = bubbleAt(w, h, size, shape, { x, y: 1 - x });
+          const label = `${w}x${h} ${size} ${shape} ${x}`;
+          assert.deepEqual(extent(b), extent(corner), label);
+          if (shape === 'rectangle') assert.equal(b.radius, corner.radius, label);
+          else assert.deepEqual([b.r, b.cx, b.cy], [b.d / 2, b.x + b.d / 2, b.y + b.d / 2], label);
+        }
+      }
+    }
+  }
+});
+
+test('bubbleAt(cornerPos(...)) deep-equals bubbleBox(...) for every corner, size, shape and canvas', () => {
+  for (const [w, h] of CANVASES) {
+    for (const corner of CORNERS) {
+      for (const size of [...SIZE_NAMES, 100, 5000]) {
+        for (const shape of SHAPES) {
+          const label = `${w}x${h} ${corner} ${size} ${shape}`;
+          assert.deepEqual(bubbleAt(w, h, size, shape, cornerPos(w, h, corner, size, shape)),
+            bubbleBox(w, h, corner, size, shape), label);
+        }
+      }
+    }
+  }
+});
+
+test('cornerPos: the corner frame\'s center, as fractions', () => {
+  // 1920x1080 medium circle bottom-right: center (1769, 929).
+  assert.deepEqual(cornerPos(1920, 1080, 'bottom-right', 'medium', 'circle'), { x: 1769 / 1920, y: 929 / 1080 });
+  // 1920x1080 medium rectangle top-right: { x: 1466, y: 32, w: 422, h: 238 } -> center (1677, 151).
+  assert.deepEqual(cornerPos(1920, 1080, 'top-right', 'medium', 'rectangle'), { x: 1677 / 1920, y: 151 / 1080 });
+  assert.deepEqual(cornerPos(1920, 1080, 'nowhere', 'medium', 'circle'), cornerPos(1920, 1080, 'bottom-right', 'medium', 'circle'),
+    'an unknown corner is bottom-right, as in bubbleBox');
+});
+
+test('bubbleAt: position (0.5, 0.5) centers the frame to within one pixel', () => {
+  for (const [w, h] of CANVASES) {
+    for (const size of SIZE_NAMES) {
+      for (const shape of SHAPES) {
+        const b = bubbleAt(w, h, size, shape, { x: 0.5, y: 0.5 });
+        const [bw, bh] = extent(b);
+        const label = `${w}x${h} ${size} ${shape}`;
+        assert.ok(Math.abs(b.x + bw / 2 - w / 2) <= 1, `${label}: x`);
+        assert.ok(Math.abs(b.y + bh / 2 - h / 2) <= 1, `${label}: y`);
+      }
+    }
+  }
+});
+
+test('bubbleAt: a known free position on 1920x1080', () => {
+  // medium circle d = 238: center (480, 270) -> x = 480 - 119 = 361, y = 270 - 119 = 151
+  assert.deepEqual(bubbleAt(1920, 1080, 'medium', 'circle', { x: 0.25, y: 0.25 }),
+    { x: 361, y: 151, d: 238, cx: 480, cy: 270, r: 119 });
+  // medium rectangle 422x238: center (960, 540) -> x = 749, y = 421
+  assert.deepEqual(bubbleAt(1920, 1080, 'medium', 'rectangle', { x: 0.5, y: 0.5 }),
+    { x: 749, y: 421, w: 422, h: 238, radius: 19 });
+});
+
+test('bubbleAt: a missing or bad position is centered, and never throws', () => {
+  for (const shape of SHAPES) {
+    const centered = bubbleAt(1920, 1080, 'medium', shape, { x: 0.5, y: 0.5 });
+    for (const bad of [null, undefined, {}, 'center', 7, true, [], { x: NaN, y: NaN }, { x: 'a', y: 'b' },
+      { x: '0.1', y: '0.9' }, { x: Infinity, y: -Infinity }, { x: null, y: undefined }]) {
+      assert.deepEqual(bubbleAt(1920, 1080, 'medium', shape, bad), centered, `${shape} ${JSON.stringify(bad)}`);
+    }
+    // A bad part alone falls back on its own; the good part is kept.
+    const halfBad = bubbleAt(1920, 1080, 'medium', shape, { x: 0.25, y: NaN });
+    assert.equal(halfBad.y, centered.y, `${shape}: y centered`);
+    assert.notEqual(halfBad.x, centered.x, `${shape}: x kept`);
+  }
+});
+
+test('bubbleAt: positions far outside 0..1 land in the matching corner', () => {
+  for (const [w, h] of CANVASES) {
+    for (const size of SIZE_NAMES) {
+      for (const shape of SHAPES) {
+        const label = `${w}x${h} ${size} ${shape}`;
+        assert.deepEqual(bubbleAt(w, h, size, shape, { x: -9, y: -9 }), bubbleBox(w, h, 'top-left', size, shape), label);
+        assert.deepEqual(bubbleAt(w, h, size, shape, { x: 9, y: -9 }), bubbleBox(w, h, 'top-right', size, shape), label);
+        assert.deepEqual(bubbleAt(w, h, size, shape, { x: -9, y: 9 }), bubbleBox(w, h, 'bottom-left', size, shape), label);
+        assert.deepEqual(bubbleAt(w, h, size, shape, { x: 9, y: 9 }), bubbleBox(w, h, 'bottom-right', size, shape), label);
+      }
+    }
+  }
+});
+
+test('bubbleAt: is pure, the same inputs always give an equal, fresh result', () => {
+  const pos = { x: 0.3, y: 0.6 };
+  const a = bubbleAt(1280, 720, 'large', 'rectangle', pos);
+  const b = bubbleAt(1280, 720, 'large', 'rectangle', pos);
+  assert.deepEqual(a, b);
+  assert.notEqual(a, b);
+  assert.deepEqual(pos, { x: 0.3, y: 0.6 }, 'the position passed in is untouched');
+});
+
+test('clampPos: is the center of bubbleAt, as fractions', () => {
+  for (const [w, h] of CANVASES) {
+    for (const size of SIZE_NAMES) {
+      for (const shape of SHAPES) {
+        for (const x of GRID) {
+          const pos = { x, y: x / 2 };
+          const b = bubbleAt(w, h, size, shape, pos);
+          const [bw, bh] = extent(b);
+          assert.deepEqual(clampPos(w, h, size, shape, pos), { x: (b.x + bw / 2) / w, y: (b.y + bh / 2) / h },
+            `${w}x${h} ${size} ${shape} ${x}`);
+        }
+      }
+    }
+  }
+});
+
+test('clampPos: fed back into bubbleAt gives the same frame, and is a fixed point', () => {
+  for (const [w, h] of CANVASES) {
+    for (const size of SIZE_NAMES) {
+      for (const shape of SHAPES) {
+        for (const x of GRID) {
+          for (const y of GRID) {
+            const label = `${w}x${h} ${size} ${shape} (${x}, ${y})`;
+            const once = clampPos(w, h, size, shape, { x, y });
+            assert.ok(once.x >= 0 && once.x <= 1 && once.y >= 0 && once.y <= 1, `${label}: inside 0..1`);
+            assert.deepEqual(bubbleAt(w, h, size, shape, once), bubbleAt(w, h, size, shape, { x, y }), label);
+            assert.deepEqual(clampPos(w, h, size, shape, once), once, `${label}: clamping twice changes nothing`);
+          }
+        }
+      }
+    }
+  }
+});
+
+test('clampPos: a position already in reach is kept to within half a pixel; a bad one is centered', () => {
+  const p = clampPos(1920, 1080, 'medium', 'circle', { x: 0.4, y: 0.6 });
+  assert.ok(Math.abs(p.x * 1920 - 0.4 * 1920) <= 0.5);
+  assert.ok(Math.abs(p.y * 1080 - 0.6 * 1080) <= 0.5);
+  assert.deepEqual(clampPos(1920, 1080, 'medium', 'circle', null), clampPos(1920, 1080, 'medium', 'circle', { x: 0.5, y: 0.5 }));
+  assert.deepEqual(clampPos(1920, 1080, 'small', 'rectangle', { x: 7, y: 7 }), cornerPos(1920, 1080, 'bottom-right', 'small', 'rectangle'));
+});
+
+// ------------------------------------------------------------------ moveBubble and layout
+
+test('moveBubble and layout: null with no session, and nothing is emitted', () => {
+  compositor.stop();
+  const moved = [];
+  const off = Takes.bus.on('bubble:moved', (p) => moved.push(p));
+  try {
+    assert.equal(compositor.moveBubble({ x: 0.5, y: 0.5 }), null);
+    assert.equal(compositor.moveBubble(null), null);
+    assert.equal(compositor.layout(), null);
+    assert.equal(moved.length, 0);
+  } finally {
+    off();
+  }
+});
+
+// A stand-in browser just large enough for the canvas picture to start: hidden videos, a canvas whose
+// 2D context records what it is asked to draw, and a worker that never ticks on its own.
+function installFakeBrowser(t, screenSize) {
+  const saved = {};
+  for (const key of ['document', 'Worker']) {
+    saved[key] = { had: Object.prototype.hasOwnProperty.call(globalThis, key), value: globalThis[key] };
+  }
+  const calls = [];
+  const ctx = {
+    lineWidth: 0, strokeStyle: '',
+    save() {}, restore() {}, beginPath() {}, closePath() {}, clip() {}, translate() {}, scale() {},
+    drawImage() {}, moveTo() {}, arcTo() {},
+    stroke() { calls.push(['stroke', this.lineWidth]); },
+    arc(...args) { calls.push(['arc', ...args]); },
+    roundRect(...args) { calls.push(['roundRect', ...args]); }
+  };
+  const makeVideo = () => ({
+    muted: false, playsInline: false, autoplay: false, srcObject: null, parentNode: null,
+    readyState: 2, videoWidth: 640, videoHeight: 480,
+    addEventListener() {}, removeEventListener() {},
+    play() { return Promise.resolve(); }, pause() {},
+    requestVideoFrameCallback(cb) { cb(); }
+  });
+  const workers = [];
+  class FakeWorker {
+    constructor() { this.onmessage = null; this.onerror = null; workers.push(this); }
+    postMessage() {}
+    terminate() {}
+  }
+  globalThis.document = {
+    createElement(tag) {
+      if (tag !== 'canvas') return makeVideo();
+      return {
+        width: 0, height: 0, parentNode: null,
+        getContext() { return ctx; },
+        captureStream() {
+          const track = { kind: 'video', readyState: 'live', stop() { this.readyState = 'ended'; } };
+          return { getTracks: () => [track], getVideoTracks: () => [track] };
+        }
+      };
+    }
+  };
+  globalThis.Worker = FakeWorker;
+  t.after(() => {
+    compositor.stop();
+    for (const key of Object.keys(saved)) {
+      if (saved[key].had) globalThis[key] = saved[key].value; else delete globalThis[key];
+    }
+  });
+  const stream = (settings) => {
+    const track = { kind: 'video', readyState: 'live', getSettings: () => settings, stop() {} };
+    return { getTracks: () => [track], getVideoTracks: () => [track] };
+  };
+  return {
+    screen: stream({ width: screenSize[0], height: screenSize[1] }),
+    camera: stream({ width: 640, height: 480 }),
+    // Draw one frame the way a worker tick does, and return what it drew.
+    tick() {
+      calls.length = 0;
+      workers[workers.length - 1].onmessage();
+      return calls.slice();
+    }
+  };
+}
+
+test('start with no pos keeps the corner path, and layout reports the corner\'s center', async (t) => {
+  const fake = installFakeBrowser(t, [1920, 1080]);
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: { corner: 'bottom-right', size: 'medium' } });
+  const corner = bubbleRect(1920, 1080, 'bottom-right', 'medium');
+  assert.deepEqual(fake.tick().find((c) => c[0] === 'arc').slice(1, 4), [corner.cx, corner.cy, corner.r]);
+  assert.deepEqual(compositor.layout(), {
+    width: 1920, height: 1080, shape: 'circle', size: 'medium',
+    pos: cornerPos(1920, 1080, 'bottom-right', 'medium', 'circle'), mirror: true
+  });
+
+  // A pos with only one finite part is not a position: the corner is used.
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: { corner: 'top-left', size: 'small', pos: { x: 0.2 } } });
+  const tl = bubbleRect(1920, 1080, 'top-left', 'small');
+  assert.deepEqual(fake.tick().find((c) => c[0] === 'arc').slice(1, 4), [tl.cx, tl.cy, tl.r]);
+  assert.deepEqual(compositor.layout().pos, cornerPos(1920, 1080, 'top-left', 'small', 'circle'));
+});
+
+test('start with a pos places the frame there; moveBubble moves it live and emits the clamped position', async (t) => {
+  const fake = installFakeBrowser(t, [1280, 720]);
+  const moved = [];
+  const off = Takes.bus.on('bubble:moved', (p) => moved.push(p));
+  t.after(off);
+
+  await compositor.start({
+    screenStream: fake.screen, cameraStream: fake.camera,
+    bubble: { corner: 'top-left', size: 'large', shape: 'rectangle', mirror: false, pos: { x: 0.25, y: 0.75 } }
+  });
+  const placed = bubbleAt(1280, 720, 'large', 'rectangle', { x: 0.25, y: 0.75 });
+  let frame = fake.tick();
+  assert.deepEqual(frame.find((c) => c[0] === 'roundRect').slice(1, 5), [placed.x, placed.y, placed.w, placed.h]);
+  const ring = frame.find((c) => c[0] === 'stroke')[1];
+  assert.deepEqual(compositor.layout(), {
+    width: 1280, height: 720, shape: 'rectangle', size: 'large',
+    pos: clampPos(1280, 720, 'large', 'rectangle', { x: 0.25, y: 0.75 }), mirror: false
+  });
+
+  // Far past the top-right: held in the top-right corner, exactly where that corner frame sits.
+  const used = compositor.moveBubble({ x: 5, y: -3 });
+  assert.deepEqual(used, cornerPos(1280, 720, 'top-right', 'large', 'rectangle'));
+  assert.deepEqual(moved, [used], 'one bubble:moved with the clamped position');
+  assert.deepEqual(compositor.layout().pos, used);
+  const tr = bubbleBox(1280, 720, 'top-right', 'large', 'rectangle');
+  frame = fake.tick();
+  assert.deepEqual(frame.find((c) => c[0] === 'roundRect').slice(1, 5), [tr.x, tr.y, tr.w, tr.h], 'the next frame shows the move');
+  assert.equal(frame.find((c) => c[0] === 'stroke')[1], ring, 'the ring width is unchanged');
+
+  // A bad position centers the frame.
+  assert.deepEqual(compositor.moveBubble(null), clampPos(1280, 720, 'large', 'rectangle', { x: 0.5, y: 0.5 }));
+
+  compositor.stop();
+  assert.equal(compositor.moveBubble({ x: 0.1, y: 0.1 }), null, 'nothing after stop');
+  assert.equal(compositor.layout(), null);
+  assert.equal(moved.length, 2);
+});
+
+test('moveBubble on a circle moves the circle, keeps the ring, and returns the position used', async (t) => {
+  const fake = installFakeBrowser(t, [1920, 1080]);
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: { corner: 'bottom-left', size: 'small' } });
+  const ring = fake.tick().find((c) => c[0] === 'stroke')[1];
+  const used = compositor.moveBubble({ x: 0.5, y: 0.5 });
+  assert.deepEqual(used, clampPos(1920, 1080, 'small', 'circle', { x: 0.5, y: 0.5 }));
+  const b = bubbleAt(1920, 1080, 'small', 'circle', used);
+  const frame = fake.tick();
+  assert.deepEqual(frame.find((c) => c[0] === 'arc').slice(1, 4), [b.cx, b.cy, b.r]);
+  assert.equal(frame.find((c) => c[0] === 'stroke')[1], ring);
+  assert.equal(compositor.layout().shape, 'circle');
+});
+
+test('moveBubble and layout: null for a passed-through stream', async (t) => {
+  class FakeMediaStream {
+    constructor(tracks) { this.tracks = tracks.slice(); }
+    getTracks() { return this.tracks.slice(); }
+    getVideoTracks() { return this.tracks.filter((tr) => tr.kind === 'video'); }
+  }
+  const had = Object.prototype.hasOwnProperty.call(globalThis, 'MediaStream');
+  const before = globalThis.MediaStream;
+  globalThis.MediaStream = FakeMediaStream;
+  t.after(() => { compositor.stop(); if (had) globalThis.MediaStream = before; else delete globalThis.MediaStream; });
+
+  const video = { kind: 'video', readyState: 'live', stop() {} };
+  await compositor.start({ screenStream: new FakeMediaStream([video]), bubble: { pos: { x: 0.5, y: 0.5 } } });
+  assert.equal(compositor.moveBubble({ x: 0.5, y: 0.5 }), null);
+  assert.equal(compositor.layout(), null);
 });

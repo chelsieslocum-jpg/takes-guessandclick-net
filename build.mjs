@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
 /** The fixed order the scripts are joined in. A file in src/js that is not named here is never bundled. */
-export const MODULE_ORDER = ['core', 'capture', 'compositor', 'recorder', 'library', 'save', 'editor', 'captions', 'ui', 'theme'];
+export const MODULE_ORDER = ['core', 'capture', 'compositor', 'recorder', 'library', 'save', 'editor', 'captions', 'pad', 'floater', 'ui', 'theme'];
 
 /** Stylesheets joined after src/styles.css, in this order, when they exist: the embedded font, then the look. */
 export const EXTRA_CSS = ['fonts.css', 'theme.css'];
