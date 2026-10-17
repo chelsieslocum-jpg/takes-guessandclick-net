@@ -15,6 +15,7 @@
   var Takes = root.Takes;
 
   var FPS = 30;
+  var STALL_FRAMES = FPS * 2; // about two seconds of frames in a row not sent counts as a stopped picture
   var MAX_WIDTH = 1920;
   var FALLBACK_ACCENT = '#FF3DA6'; // must stay equal to --tk-accent
   var CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
@@ -430,6 +431,9 @@
     s.generator = null;
     s.pendingWrites = 0;
     s.frameErrors = 0;
+    s.missedFrames = 0;
+    s.stallWarned = false;
+    s.lastTimestamp = 0;
     var Generator = root.MediaStreamTrackGenerator;
     if (typeof Generator === 'function' && typeof root.VideoFrame === 'function' && typeof root.MediaStream === 'function') {
       var generator = null;
@@ -459,31 +463,68 @@
     return Math.round(ms * 1000);
   }
 
+  /** Logs the first frame error of a session, with what went wrong. Later ones are only counted. */
+  function noteFrameError(s, err) {
+    s.frameErrors++;
+    if (s.frameErrors === 1 && typeof console !== 'undefined' && console.error) {
+      console.error('[Takes] the compositor could not send a frame:', err);
+    }
+  }
+
+  /**
+   * Counts one frame that did not go out. Once STALL_FRAMES in a row have not gone out, the picture in the
+   * recording has stopped moving, so the person is told once for that stall. The take is not ended: the sound
+   * and what was recorded so far are still theirs to keep. A write that lands clears the count (see pushFrame).
+   */
+  function missFrame(s, reason) {
+    if (session !== s || !s.writer) return; // stopped: nothing is being recorded any more
+    s.missedFrames++;
+    if (s.missedFrames < STALL_FRAMES || s.stallWarned) return;
+    s.stallWarned = true;
+    if (typeof console !== 'undefined' && console.error) {
+      console.error('[Takes] the recording picture stopped updating: ' + s.missedFrames +
+        ' frames in a row were not sent (' + reason + ').');
+    }
+    emitToast('error', 'The video picture stopped updating. Stop now to keep what you have, then record again.');
+  }
+
   /**
    * Sends what the canvas shows now as one frame, when frames are pushed by hand (a no-op on the captureStream
    * road). A frame is dropped rather than queued while two writes are still in flight, so a slow consumer can
-   * never pile up frames (each one holds a copy of the picture).
+   * never pile up frames (each one holds a copy of the picture). Every frame that does not go out is counted,
+   * so a picture that has stopped is reported rather than recorded silently.
    */
   function pushFrame(s) {
-    if (!s.writer || s.pendingWrites >= 2) return;
-    var frame;
-    try {
-      frame = new root.VideoFrame(s.canvas, { timestamp: nowMicros() });
-    } catch (err) {
-      s.frameErrors++;
-      if (s.frameErrors === 1 && typeof console !== 'undefined' && console.error) {
-        console.error('[Takes] the compositor could not send a frame:', err);
-      }
+    if (!s.writer) return;
+    if (s.pendingWrites >= 2) {
+      missFrame(s, 'earlier frames are still waiting to be taken');
       return;
     }
+    // Each frame's timestamp is later than the one before, even if the clock has not moved on.
+    var timestamp = Math.max(nowMicros(), s.lastTimestamp + 1);
+    var frame;
+    try {
+      frame = new root.VideoFrame(s.canvas, { timestamp: timestamp });
+    } catch (err) {
+      noteFrameError(s, err);
+      missFrame(s, 'a frame could not be made from the canvas');
+      return;
+    }
+    s.lastTimestamp = timestamp;
     var writer = s.writer;
     s.pendingWrites++;
     // The generator takes the frame and releases it once sent; a refused write leaves it with us to release.
     Promise.resolve().then(function () { return writer.write(frame); }).then(function () {
       s.pendingWrites--;
-    }, function () {
+      s.missedFrames = 0;
+      s.stallWarned = false; // the picture is moving again, so a later stall is reported again
+    }, function (err) {
       s.pendingWrites--;
-      try { frame.close(); } catch (err) { /* already released */ }
+      try { frame.close(); } catch (closeErr) { /* already released */ }
+      // A write refused because stop() closed the writer is the normal end of a take, not a fault.
+      if (s.writer !== writer) return;
+      noteFrameError(s, err);
+      missFrame(s, 'the browser refused a frame');
     });
   }
 

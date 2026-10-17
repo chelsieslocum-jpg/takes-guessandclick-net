@@ -552,6 +552,7 @@ test('moveBubble and layout: null with no session, and nothing is emitted', () =
 // 2D context records what it is asked to draw, and a worker that never ticks on its own.
 // options.generator: also install MediaStreamTrackGenerator, VideoFrame and MediaStream, recording every frame
 // made and written. options.frameThrows: VideoFrame refuses to make a frame from the canvas.
+// options.rejectWrites: the generator's writer refuses every frame, as a generator that has died does.
 function installFakeBrowser(t, screenSize, options = {}) {
   const saved = {};
   for (const key of ['document', 'Worker', 'MediaStreamTrackGenerator', 'VideoFrame', 'MediaStream']) {
@@ -580,8 +581,15 @@ function installFakeBrowser(t, screenSize, options = {}) {
         const gen = this;
         this.writable = {
           getWriter: () => ({
-            // Each write stays in flight until the test settles it.
-            write(frame) { return new Promise((resolve, reject) => { writes.push({ frame, resolve, reject }); }); },
+            // Each write stays in flight until the test settles it. A write after close() is refused, as a
+            // real stream writer refuses it; options.rejectWrites refuses every write.
+            write(frame) {
+              if (gen.writerClosed || options.rejectWrites) {
+                writes.push({ frame, refused: true });
+                return Promise.reject(new TypeError('the writer is closed'));
+              }
+              return new Promise((resolve, reject) => { writes.push({ frame, resolve, reject }); });
+            },
             close() { gen.writerClosed = true; return Promise.resolve(); }
           })
         };
@@ -742,8 +750,20 @@ test('moveBubble and layout: null for a passed-through stream', async (t) => {
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
+// Collects the toasts and console.error calls made during one test, without printing them.
+function watchWarnings(t) {
+  const toasts = [];
+  const off = Takes.bus.on('toast', (msg) => toasts.push(msg));
+  t.after(off);
+  const errors = t.mock.method(console, 'error', () => {});
+  return { toasts, errors: () => errors.mock.calls.map((c) => c.arguments) };
+}
+
+const STALL_TEXT = 'The video picture stopped updating. Stop now to keep what you have, then record again.';
+
 test('canvas picture: with a track generator, each tick sends exactly one frame of the canvas and captureStream is never used', async (t) => {
   const fake = installFakeBrowser(t, [1920, 1080], { generator: true });
+  watchWarnings(t);
   const stream = await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: {} });
   assert.deepEqual(fake.captureCalls, [], 'canvas.captureStream is not called');
   assert.equal(fake.generators.length, 1);
@@ -804,4 +824,144 @@ test('canvas picture: when no frame can be made from the canvas, it falls back t
   fake.tick();
   await settle();
   assert.equal(fake.writes.length, 0);
+});
+
+test('canvas picture: writes that never settle warn once, after about two seconds of frames not sent, and never end the take', async (t) => {
+  const fake = installFakeBrowser(t, [1920, 1080], { generator: true });
+  const seen = watchWarnings(t);
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: {} });
+  await settle();
+  fake.tick(); // the second write: two are now in flight, and neither ever lands
+  await settle();
+  assert.equal(fake.writes.length, 2);
+
+  for (let i = 0; i < 59; i++) fake.tick();
+  await settle();
+  assert.equal(seen.toasts.length, 0, 'no warning before 60 frames in a row have not gone out');
+  assert.equal(seen.errors().length, 0);
+
+  fake.tick(); // the 60th frame not sent
+  await settle();
+  assert.deepEqual(seen.toasts, [{ kind: 'error', text: STALL_TEXT }]);
+  assert.equal(seen.errors().length, 1);
+  assert.match(String(seen.errors()[0][0]), /stopped updating/);
+
+  for (let i = 0; i < 120; i++) fake.tick();
+  await settle();
+  assert.equal(seen.toasts.length, 1, 'no repeat while the picture is still stalled');
+  assert.equal(seen.errors().length, 1);
+  assert.equal(fake.writes.length, 2, 'nothing is queued behind the stalled writes');
+  assert.ok(compositor.layout(), 'the take is not ended');
+  assert.equal(fake.generators[0].readyState, 'live');
+});
+
+test('canvas picture: a writer that refuses every frame warns once, logs the first refusal, and releases every frame', async (t) => {
+  const fake = installFakeBrowser(t, [1920, 1080], { generator: true, rejectWrites: true });
+  const seen = watchWarnings(t);
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: {} });
+  await settle(); // the first frame, sent as the stream opened, is refused: one frame not sent
+  assert.equal(seen.errors().length, 1, 'the first refusal is logged');
+  assert.match(String(seen.errors()[0][0]), /could not send a frame/);
+
+  for (let i = 0; i < 58; i++) { fake.tick(); await settle(); }
+  assert.equal(seen.toasts.length, 0, '59 frames not sent: no warning yet');
+
+  fake.tick();
+  await settle();
+  assert.deepEqual(seen.toasts, [{ kind: 'error', text: STALL_TEXT }]);
+  assert.equal(seen.errors().length, 2, 'the first refusal and the stall, nothing more');
+  assert.match(String(seen.errors()[1][0]), /stopped updating/);
+
+  for (let i = 0; i < 90; i++) { fake.tick(); await settle(); }
+  assert.equal(seen.toasts.length, 1, 'no repeat while every write is still refused');
+  assert.equal(seen.errors().length, 2, 'later refusals are counted, not logged');
+  assert.equal(fake.writes.length, 150);
+  assert.ok(fake.writes.every((w) => w.refused && w.frame.closed), 'every refused frame is released');
+  assert.ok(fake.frames.every((f) => f.closed), 'no frame is left holding a picture');
+});
+
+test('canvas picture: a write that lands clears the count, so a later stall warns again', async (t) => {
+  const fake = installFakeBrowser(t, [1920, 1080], { generator: true });
+  const seen = watchWarnings(t);
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: {} });
+  await settle();
+  fake.tick();
+  await settle();
+
+  // 40 frames not sent, then one write lands, then 40 more: never 60 in a row, so no warning.
+  for (let i = 0; i < 40; i++) fake.tick();
+  fake.writes[0].resolve();
+  await settle();
+  fake.tick(); // goes out
+  await settle();
+  for (let i = 0; i < 40; i++) fake.tick();
+  await settle();
+  assert.equal(seen.toasts.length, 0, 'the count started again after the write landed');
+
+  for (let i = 0; i < 20; i++) fake.tick();
+  await settle();
+  assert.equal(seen.toasts.length, 1, '60 in a row since the last write that landed');
+
+  // The writes recover: the picture moves again, and a later stall is reported again.
+  for (const w of fake.writes) if (w.resolve) w.resolve();
+  await settle();
+  fake.tick();
+  fake.tick();
+  await settle();
+  for (let i = 0; i < 59; i++) fake.tick();
+  await settle();
+  assert.equal(seen.toasts.length, 1);
+  fake.tick();
+  await settle();
+  assert.equal(seen.toasts.length, 2, 'a second stall gets its own warning');
+  assert.equal(seen.errors().length, 2);
+});
+
+test('canvas picture: a frame pushed just before stop() goes to the closing writer, is released, and nothing is left unhandled', async (t) => {
+  const fake = installFakeBrowser(t, [1920, 1080], { generator: true });
+  const seen = watchWarnings(t);
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  t.after(() => process.off('unhandledRejection', onUnhandled));
+
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: {} });
+  await settle();
+  assert.equal(fake.writes.length, 1);
+  fake.tick(); // the write is deferred to a microtask...
+  compositor.stop(); // ...so it reaches the writer only after stop() has closed it
+  assert.equal(fake.generators[0].writerClosed, true);
+  await settle();
+  await settle();
+
+  assert.equal(fake.writes.length, 2, 'the deferred write still went to the writer');
+  assert.equal(fake.writes[1].refused, true, 'the closed writer refused it');
+  assert.equal(fake.writes[1].frame.closed, true, 'its frame is released');
+  assert.deepEqual(unhandled, []);
+  assert.equal(seen.errors().length, 0, 'the normal end of a take logs nothing');
+  assert.equal(seen.toasts.length, 0);
+  fake.writes[0].resolve();
+  await settle();
+});
+
+test('canvas picture: frame timestamps always increase, even when the clock has not moved', async (t) => {
+  const fake = installFakeBrowser(t, [1920, 1080], { generator: true });
+  watchWarnings(t);
+  let clock = 5000;
+  t.mock.method(performance, 'now', () => clock);
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: {} });
+  await settle();
+  for (let i = 0; i < 6; i++) {
+    for (const w of fake.writes) if (w.resolve) w.resolve();
+    await settle();
+    if (i === 3) clock = 4000; // the clock even steps back once
+    fake.tick();
+    await settle();
+  }
+  const stamps = fake.writes.map((w) => w.frame.timestamp);
+  assert.equal(stamps.length, 7);
+  for (let i = 1; i < stamps.length; i++) {
+    assert.ok(stamps[i] > stamps[i - 1], 'timestamp ' + i + ' (' + stamps[i] + ') is after ' + stamps[i - 1]);
+  }
+  assert.equal(stamps[0], 5000000);
 });
