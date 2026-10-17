@@ -3004,6 +3004,86 @@ body.tk-floater .tk-pad-hint { font-size: var(--tk-fs-xs); line-height: 16px; wh
     }
   }
 
+  // ---------------------------------------------------------------- frame output
+  //
+  // Why the picture is not sent with canvas.captureStream() where it can be avoided: in Chrome and Edge, a canvas
+  // capture track stops delivering frames for good while the page also has a Document Picture-in-Picture window
+  // open and the tab is in front. The canvas keeps being drawn 30 times a second, but the track goes silent,
+  // usually as the recorder starts or as the floating window is resized, so the recording keeps its sound and its
+  // picture freezes (or holds no video at all). The stall is in the browser's capture of a GPU-drawn canvas:
+  // the same canvas drawn without the GPU never stalls, but then each frame costs far too much main-thread time
+  // at full size.
+  // A track generator does not wait on anything: each tick hands it one VideoFrame made from the canvas, so a
+  // frame is sent exactly when one is drawn, whatever the page's rendering is doing. A browser without a
+  // generator has no Document Picture-in-Picture either, so captureStream() is safe there.
+
+  /**
+   * Opens the track the canvas picture is sent on, sets s.writer when frames are pushed by hand, and returns
+   * the MediaStream. Falls back to canvas.captureStream(FPS) when the generator, VideoFrame or MediaStream is
+   * missing, or when a frame cannot be made from this canvas.
+   */
+  function openFrameOutput(s) {
+    s.writer = null;
+    s.generator = null;
+    s.pendingWrites = 0;
+    s.frameErrors = 0;
+    var Generator = root.MediaStreamTrackGenerator;
+    if (typeof Generator === 'function' && typeof root.VideoFrame === 'function' && typeof root.MediaStream === 'function') {
+      var generator = null;
+      try {
+        // One frame first, so a canvas the browser cannot make frames from takes the captureStream road instead.
+        var probe = new root.VideoFrame(s.canvas, { timestamp: 0 });
+        try { probe.close(); } catch (err) { /* already released */ }
+        generator = new Generator({ kind: 'video' });
+        var writer = generator.writable.getWriter();
+        var stream = new root.MediaStream([generator]);
+        s.generator = generator;
+        s.writer = writer;
+        return stream;
+      } catch (err) {
+        if (generator) { try { generator.stop(); } catch (stopErr) { /* never started */ } }
+        s.generator = null;
+        s.writer = null;
+      }
+    }
+    return s.canvas.captureStream(FPS);
+  }
+
+  /** The time in microseconds, for a VideoFrame's timestamp. */
+  function nowMicros() {
+    var perf = root.performance;
+    var ms = perf && typeof perf.now === 'function' ? perf.now() : Date.now();
+    return Math.round(ms * 1000);
+  }
+
+  /**
+   * Sends what the canvas shows now as one frame, when frames are pushed by hand (a no-op on the captureStream
+   * road). A frame is dropped rather than queued while two writes are still in flight, so a slow consumer can
+   * never pile up frames (each one holds a copy of the picture).
+   */
+  function pushFrame(s) {
+    if (!s.writer || s.pendingWrites >= 2) return;
+    var frame;
+    try {
+      frame = new root.VideoFrame(s.canvas, { timestamp: nowMicros() });
+    } catch (err) {
+      s.frameErrors++;
+      if (s.frameErrors === 1 && typeof console !== 'undefined' && console.error) {
+        console.error('[Takes] the compositor could not send a frame:', err);
+      }
+      return;
+    }
+    var writer = s.writer;
+    s.pendingWrites++;
+    // The generator takes the frame and releases it once sent; a refused write leaves it with us to release.
+    Promise.resolve().then(function () { return writer.write(frame); }).then(function () {
+      s.pendingWrites--;
+    }, function () {
+      s.pendingWrites--;
+      try { frame.close(); } catch (err) { /* already released */ }
+    });
+  }
+
   function startCanvasMode(screenStream, cameraStream, bubble, myGeneration) {
     var doc = root.document;
     if (!doc || typeof root.Worker !== 'function' || !root.URL || typeof root.Blob !== 'function') {
@@ -3079,7 +3159,11 @@ body.tk-floater .tk-pad-hint { font-size: var(--tk-fs-xs); line-height: 16px; wh
 
         s.workerUrl = root.URL.createObjectURL(new root.Blob([WORKER_SOURCE], { type: 'text/javascript' }));
         s.worker = new root.Worker(s.workerUrl);
-        s.worker.onmessage = function () { if (session === s) drawFrame(s); };
+        s.worker.onmessage = function () {
+          if (session !== s) return;
+          drawFrame(s);
+          pushFrame(s);
+        };
         s.worker.onerror = function (e) {
           if (typeof console !== 'undefined' && console.error) {
             console.error('[Takes] the compositor timer failed:', e && e.message ? e.message : e);
@@ -3088,7 +3172,8 @@ body.tk-floater .tk-pad-hint { font-size: var(--tk-fs-xs); line-height: 16px; wh
 
         drawFrame(s); // one frame before the stream exists, so it never opens on a blank picture
         s.worker.postMessage('start');
-        s.stream = s.canvas.captureStream(FPS);
+        s.stream = openFrameOutput(s);
+        pushFrame(s); // the first frame goes out now, not a tick later
 
         // Give the canvas stream a consumer NOW, before any recorder exists. With nothing reading
         // it through the countdown, the recorder re-bases the video clock once its encoder is up,
@@ -3130,6 +3215,11 @@ body.tk-floater .tk-pad-hint { font-size: var(--tk-fs-xs); line-height: 16px; wh
     if (s.workerUrl) {
       try { root.URL.revokeObjectURL(s.workerUrl); } catch (err) { /* already revoked */ }
       s.workerUrl = null;
+    }
+    if (s.writer) {
+      var writer = s.writer;
+      s.writer = null;
+      try { Promise.resolve(writer.close()).catch(function () {}); } catch (err) { /* already closed */ }
     }
     // Only the canvas stream is ours to stop. A passed-through track belongs to capture.
     if (s.mode === 'canvas' && s.stream) {

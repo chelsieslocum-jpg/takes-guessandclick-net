@@ -550,10 +550,50 @@ test('moveBubble and layout: null with no session, and nothing is emitted', () =
 
 // A stand-in browser just large enough for the canvas picture to start: hidden videos, a canvas whose
 // 2D context records what it is asked to draw, and a worker that never ticks on its own.
-function installFakeBrowser(t, screenSize) {
+// options.generator: also install MediaStreamTrackGenerator, VideoFrame and MediaStream, recording every frame
+// made and written. options.frameThrows: VideoFrame refuses to make a frame from the canvas.
+function installFakeBrowser(t, screenSize, options = {}) {
   const saved = {};
-  for (const key of ['document', 'Worker']) {
+  for (const key of ['document', 'Worker', 'MediaStreamTrackGenerator', 'VideoFrame', 'MediaStream']) {
     saved[key] = { had: Object.prototype.hasOwnProperty.call(globalThis, key), value: globalThis[key] };
+  }
+  const captureCalls = [];
+  const frames = [];
+  const writes = [];
+  const generators = [];
+  if (options.generator) {
+    globalThis.VideoFrame = class FakeVideoFrame {
+      constructor(source, init) {
+        if (options.frameThrows) throw new Error('no frame from this canvas');
+        this.source = source;
+        this.timestamp = init.timestamp;
+        this.closed = false;
+        frames.push(this);
+      }
+      close() { this.closed = true; }
+    };
+    globalThis.MediaStreamTrackGenerator = class FakeGenerator {
+      constructor(init) {
+        this.kind = init.kind;
+        this.readyState = 'live';
+        this.writerClosed = false;
+        const gen = this;
+        this.writable = {
+          getWriter: () => ({
+            // Each write stays in flight until the test settles it.
+            write(frame) { return new Promise((resolve, reject) => { writes.push({ frame, resolve, reject }); }); },
+            close() { gen.writerClosed = true; return Promise.resolve(); }
+          })
+        };
+        generators.push(this);
+      }
+      stop() { this.readyState = 'ended'; }
+    };
+    globalThis.MediaStream = class FakeMediaStream {
+      constructor(tracks) { this.tracks = tracks.slice(); }
+      getTracks() { return this.tracks.slice(); }
+      getVideoTracks() { return this.tracks.filter((tr) => tr.kind === 'video'); }
+    };
   }
   const calls = [];
   const ctx = {
@@ -583,7 +623,8 @@ function installFakeBrowser(t, screenSize) {
       return {
         width: 0, height: 0, parentNode: null,
         getContext() { return ctx; },
-        captureStream() {
+        captureStream(fps) {
+          captureCalls.push(fps);
           const track = { kind: 'video', readyState: 'live', stop() { this.readyState = 'ended'; } };
           return { getTracks: () => [track], getVideoTracks: () => [track] };
         }
@@ -604,6 +645,7 @@ function installFakeBrowser(t, screenSize) {
   return {
     screen: stream({ width: screenSize[0], height: screenSize[1] }),
     camera: stream({ width: 640, height: 480 }),
+    captureCalls, frames, writes, generators,
     // Draw one frame the way a worker tick does, and return what it drew.
     tick() {
       calls.length = 0;
@@ -696,4 +738,70 @@ test('moveBubble and layout: null for a passed-through stream', async (t) => {
   await compositor.start({ screenStream: new FakeMediaStream([video]), bubble: { pos: { x: 0.5, y: 0.5 } } });
   assert.equal(compositor.moveBubble({ x: 0.5, y: 0.5 }), null);
   assert.equal(compositor.layout(), null);
+});
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test('canvas picture: with a track generator, each tick sends exactly one frame of the canvas and captureStream is never used', async (t) => {
+  const fake = installFakeBrowser(t, [1920, 1080], { generator: true });
+  const stream = await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: {} });
+  assert.deepEqual(fake.captureCalls, [], 'canvas.captureStream is not called');
+  assert.equal(fake.generators.length, 1);
+  assert.equal(fake.generators[0].kind, 'video');
+  assert.deepEqual(stream.getVideoTracks(), [fake.generators[0]], 'the picture goes out on the generator track');
+
+  // The probe frame is released at once; the first real frame is sent as the stream opens.
+  assert.equal(fake.frames[0].closed, true);
+  await settle();
+  assert.equal(fake.writes.length, 1);
+  assert.equal(fake.writes[0].frame.source.width, 1920, 'the frame is made from the canvas');
+  assert.ok(fake.writes[0].frame.timestamp > 0);
+
+  // Every tick draws and sends one frame.
+  fake.tick();
+  await settle();
+  assert.equal(fake.writes.length, 2);
+
+  // With two writes still in flight a tick still draws, but its frame is dropped, never queued.
+  const drawn = fake.tick();
+  assert.ok(drawn.some((c) => c[0] === 'arc'), 'the tick still draws');
+  await settle();
+  assert.equal(fake.writes.length, 2);
+  assert.equal(fake.frames.length, 3, 'no frame is even made while two are in flight');
+
+  // Once one write lands, the next tick sends again.
+  fake.writes[0].resolve();
+  await settle();
+  fake.tick();
+  await settle();
+  assert.equal(fake.writes.length, 3);
+
+  // A refused write releases its frame.
+  fake.writes[1].reject(new Error('refused'));
+  await settle();
+  assert.equal(fake.writes[1].frame.closed, true);
+
+  compositor.stop();
+  assert.equal(fake.generators[0].writerClosed, true, 'stop closes the writer');
+  assert.equal(fake.generators[0].readyState, 'ended', 'stop ends the generator track');
+  fake.writes[2].resolve();
+  await settle();
+});
+
+test('canvas picture: with no track generator, the canvas is captured at 30 frames a second', async (t) => {
+  const fake = installFakeBrowser(t, [1280, 720]);
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: {} });
+  assert.deepEqual(fake.captureCalls, [30]);
+  fake.tick();
+  assert.equal(fake.writes.length, 0);
+});
+
+test('canvas picture: when no frame can be made from the canvas, it falls back to captureStream', async (t) => {
+  const fake = installFakeBrowser(t, [1280, 720], { generator: true, frameThrows: true });
+  await compositor.start({ screenStream: fake.screen, cameraStream: fake.camera, bubble: {} });
+  assert.deepEqual(fake.captureCalls, [30]);
+  assert.equal(fake.generators.length, 0, 'no generator is left open');
+  fake.tick();
+  await settle();
+  assert.equal(fake.writes.length, 0);
 });
