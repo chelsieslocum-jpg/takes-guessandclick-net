@@ -74,6 +74,7 @@
   var lastSecondsLeft;
   var gotDone = false;     // record:done arrived for the take on screen
   var extra = 0;           // height added to the window on top of the bar, in CSS pixels
+  var fitting = false;     // a fresh or reused window is being sized as a whole, so setExtra only records
   var busy = false;        // a download asked for from this window has not answered yet
   var generation = 0;      // goes up on every close, so a window that arrives late is closed again
   var pending = null;      // the open that is waiting for the browser
@@ -175,10 +176,21 @@
 
   // ---------------------------------------------------------------- window size
 
+  /**
+   * How wide the bubble map's frame is: the window's inner width less the side padding, so a window
+   * wider than the bar gets a taller map and the hint line under it still fits. While a window is
+   * being fitted it is about to become the bar's width, so that width is used.
+   */
+  function padFrameWidth() {
+    var w = fitting ? NaN : Number(win && win.innerWidth);
+    if (!isFinite(w) || !(w > PAD_SIDE)) w = BAR_SIZE.width;
+    return w - PAD_SIDE;
+  }
+
   function liveExtra() {
     var px = hooks && hooks.wholeScreen ? NOTE_EXTRA : 0;
     if (padOpen) {
-      px += Math.round((BAR_SIZE.width - PAD_SIDE) / aspectOf(readLayout())) + PAD_HINT;
+      px += Math.round(padFrameWidth() / aspectOf(readLayout())) + PAD_HINT;
     }
     return px;
   }
@@ -186,6 +198,7 @@
   /** Grow or shrink the window so it has px of height on top of the bar. A refused resize changes nothing. */
   function setExtra(px) {
     var delta = px - extra;
+    if (fitting) { extra = px; return; }   // fitWindow sets the whole size once the view is known
     if (!win || delta === 0 || typeof win.resizeTo !== 'function') return;
     var w = Number(win.outerWidth);
     var h = Number(win.outerHeight);
@@ -197,6 +210,36 @@
       win.resizeTo(Math.round(w), Math.round(h + delta));
       extra = px;
     } catch (err) { /* resizing needs a click; without one the window keeps its size */ }
+  }
+
+  /**
+   * Size the window to exactly what the current view needs. Chrome and Edge reopen the
+   * Picture-in-Picture window at the size it last had (a take with the map open leaves it big) and
+   * ignore the size requestWindow asked for, so this runs as soon as a window is attached or reused,
+   * still inside the click. resizeTo sets the OUTER size, so the browser's own frame is added on.
+   * A refused resize (the click's permission has run out) is silent: the CSS fits a bigger window.
+   */
+  function fitWindow() {
+    if (!win || typeof win.resizeTo !== 'function') return;
+    var wantW = BAR_SIZE.width;
+    var wantH = BAR_SIZE.height + extra;
+    var ow = Number(win.outerWidth);
+    var oh = Number(win.outerHeight);
+    var iw = Number(win.innerWidth);
+    var ih = Number(win.innerHeight);
+    if (!(isFinite(ow) && isFinite(oh) && isFinite(iw) && isFinite(ih))) return;
+    if (!(iw > 0 && ih > 0 && ow >= iw && oh >= ih)) return;
+    if (Math.round(iw) === wantW && Math.round(ih) === wantH) return;
+    try {
+      win.resizeTo(Math.round(ow - iw + wantW), Math.round(oh - ih + wantH));
+    } catch (err) { /* no click left to resize with; the bar's CSS handles the bigger window */ }
+  }
+
+  /** Show the view that matches the recorder, then size the whole window to it in one step. */
+  function syncAndFit() {
+    fitting = true;
+    try { syncToState(); } finally { fitting = false; }
+    fitWindow();
   }
 
   // ---------------------------------------------------------------- the bubble map
@@ -541,7 +584,7 @@
       Takes.bus.on('record:done', onDone),
       Takes.bus.on('bubble:moved', onMoved)
     ];
-    syncToState();
+    syncAndFit();
   }
 
   /** Let go of the window: the map, the timer, the listeners. Safe to call twice. */
@@ -594,7 +637,7 @@
     var existing = null;
     try { existing = dpip.window || null; } catch (err) { existing = null; /* treat as none open */ }
     if (existing) {
-      if (existing === win) syncToState();
+      if (existing === win) syncAndFit();
       else { teardown(); attach(existing); }
       return Promise.resolve(true);
     }

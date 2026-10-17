@@ -56,6 +56,20 @@
   var baseTitle = '';                // the tab title when nothing is being recorded
   var toasts = [];          // { node, text, timer }
 
+  // The camera bubble's place. The setup map is a 1920 x 1080 frame; positions are the bubble's
+  // center as fractions of the frame, so they carry over to a recording of any size.
+  var SETUP_W = 1920;
+  var SETUP_H = 1080;
+  var BUBBLE_SIZE = 'medium';
+  var PAD_LABEL = 'Camera bubble position';
+  // Said on the stage when the browser has no floating controls.
+  var LIVE_TEXT_NO_FLOATER = 'Recording. Switch to what you want to show. Come back to this tab, or use your browser\'s Stop sharing bar, to finish.';
+  var bubblePos = null;     // a position the person dragged to, or null when a corner is used
+  var lastLivePos = null;   // where the bubble was moved to during the take, kept for the next one
+  var setupPad = null;      // the map in the setup panel
+  var stagePad = null;      // the map on the record page while the floating controls are closed
+  var floaterOpening = false; // the floating controls were asked for and the browser has not answered
+
   // ================================================================ 1. small tools
 
   function byId(id) {
@@ -97,9 +111,12 @@
     for (var c = 0; c < el.cornerInputs.length; c++) {
       if (el.cornerInputs[c] && el.cornerInputs[c].checked) defaultCorner = el.cornerInputs[c].value;
     }
+    el.padField = byId('tk-pad-field');
+    el.setupPadBox = byId('tk-setup-pad');
     el.setupNote = byId('tk-setup-note');
     el.recordHint = byId('tk-record-hint');
     el.recordLive = byId('tk-record-live');
+    el.stagePad = byId('tk-stage-pad');
     liveText = el.recordLive ? el.recordLive.textContent : '';
     el.captionsFileNote = byId('tk-captions-file-note');
     el.recordBtn = byId('tk-record-btn');
@@ -109,6 +126,7 @@
     el.recbar = byId('tk-recbar');
     el.recStatus = byId('tk-rec-status');
     el.recTimer = byId('tk-rec-timer');
+    el.popoutBtn = byId('tk-popout-btn');
     el.pauseBtn = byId('tk-pause-btn');
     el.resumeBtn = byId('tk-resume-btn');
     el.stopBtn = byId('tk-stop-btn');
@@ -358,6 +376,7 @@
       message = 'This browser cannot record MP4 video. Please update Chrome or Edge.';
     }
     capsOk = message === '';
+    if (!floaterSupported()) liveText = LIVE_TEXT_NO_FLOATER; // never point at controls that cannot appear
     if (!capsOk) {
       el.bannerText.textContent = message;
       // The same recorder is online; a browser that cannot run this file is offered that page.
@@ -442,6 +461,85 @@
     return defaultCorner;
   }
 
+  function setupShape() {
+    return el.bubbleShapeRect && el.bubbleShapeRect.checked ? 'rectangle' : 'circle';
+  }
+
+  function isPos(pos) {
+    return !!pos && typeof pos === 'object' &&
+      typeof pos.x === 'number' && isFinite(pos.x) &&
+      typeof pos.y === 'number' && isFinite(pos.y);
+  }
+
+  function hasPadParts() {
+    var C = Takes.compositor;
+    return !!(Takes.pad && typeof Takes.pad.mount === 'function' && C &&
+      typeof C.clampPos === 'function' && typeof C.cornerPos === 'function');
+  }
+
+  /** A position held inside the setup frame, the way a recording would hold it. */
+  function clampSetupPos(pos) {
+    return Takes.compositor.clampPos(SETUP_W, SETUP_H, BUBBLE_SIZE, setupShape(), pos);
+  }
+
+  /** Where the setup map shows the bubble: the dragged position, or the chosen corner's. */
+  function shownSetupPos() {
+    if (bubblePos) return { x: bubblePos.x, y: bubblePos.y };
+    return Takes.compositor.cornerPos(SETUP_W, SETUP_H, chosenCorner(), BUBBLE_SIZE, setupShape());
+  }
+
+  function uncheckCorners() {
+    for (var i = 0; i < el.cornerInputs.length; i++) {
+      if (el.cornerInputs[i]) el.cornerInputs[i].checked = false;
+    }
+  }
+
+  function setupBusy() {
+    return starting || recState !== 'idle' || !capsOk;
+  }
+
+  /** The setup map: dragging it sets a free position and clears the corner choice. */
+  function mountSetupPad() {
+    if (setupPad || !el.setupPadBox || !hasPadParts()) return;
+    try {
+      setupPad = Takes.pad.mount(el.setupPadBox, {
+        doc: root.document,
+        aspect: SETUP_W / SETUP_H,
+        shape: setupShape(),
+        size: BUBBLE_SIZE,
+        pos: shownSetupPos(),
+        label: PAD_LABEL,
+        onMove: function (pos) {
+          // While a take is being set up or made, the setup map holds still.
+          if (setupBusy()) return lastLivePos || shownSetupPos();
+          bubblePos = clampSetupPos(pos);
+          uncheckCorners();
+          return { x: bubblePos.x, y: bubblePos.y };
+        },
+        onSettle: function () {
+          // Remembered once the drag ends, never on every move.
+          if (setupBusy() || !bubblePos) return;
+          savePrefs();
+        }
+      });
+    } catch (err) {
+      setupPad = null; // the corners still work without the map
+    }
+  }
+
+  /** Keep the setup map in step with a corner or shape the person just picked. */
+  function onSetupChange(target) {
+    var isCorner = false;
+    for (var i = 0; i < el.cornerInputs.length; i++) if (target === el.cornerInputs[i]) isCorner = true;
+    if (isCorner) bubblePos = null; // a corner is today's exact placement
+    if (!setupPad) return;
+    if (target === el.bubbleShapeCircle || target === el.bubbleShapeRect) {
+      setupPad.setShape(setupShape());
+      if (bubblePos) bubblePos = clampSetupPos(bubblePos);
+    }
+    if (isCorner || target === el.bubbleShapeCircle || target === el.bubbleShapeRect) setupPad.setPos(shownSetupPos());
+  }
+
   function readSetup() {
     return {
       screen: !!el.srcScreen.checked,
@@ -452,7 +550,8 @@
       micId: el.srcMic.checked ? wantedDevice(el.micSelect, 'micId', 'micLabel').id : '',
       micLabel: el.srcMic.checked ? wantedDevice(el.micSelect, 'micId', 'micLabel').label : '',
       corner: chosenCorner(),
-      shape: el.bubbleShapeRect && el.bubbleShapeRect.checked ? 'rectangle' : 'circle',
+      pos: bubblePos ? { x: bubblePos.x, y: bubblePos.y } : null, // null: the corner decides
+      shape: setupShape(),
       // The bubble can show a video file in place of the live camera; it still needs the Camera chip on.
       bubbleFromFile: !!el.srcCamera.checked && !!el.bubbleFileRadio.checked,
       bubbleSound: !!el.bubbleSound.checked
@@ -515,7 +614,7 @@
     var old = recall(KEY_PREFS) || {};
     var camera = chosenDevice(el.cameraSelect, old.cameraId, old.cameraLabel);
     var mic = chosenDevice(el.micSelect, old.micId, old.micLabel);
-    remember(KEY_PREFS, {
+    var prefs = {
       screen: s.screen,
       camera: s.camera,
       mic: s.mic,
@@ -527,7 +626,9 @@
       shape: s.shape,
       bubble: el.bubbleFileRadio.checked ? 'file' : 'camera',
       bubbleSound: s.bubbleSound
-    });
+    };
+    if (s.pos) prefs.pos = { x: s.pos.x, y: s.pos.y }; // only a dragged position; a corner leaves it out
+    remember(KEY_PREFS, prefs);
   }
 
   /**
@@ -568,6 +669,7 @@
     setHidden(el.cameraField, !s.camera || s.bubbleFromFile); // a video file needs no camera
     setHidden(el.micField, !s.mic);
     setHidden(el.corners, !(s.screen && s.camera));
+    setHidden(el.padField, !(s.screen && s.camera)); // the map, like the corners, needs a screen to place the bubble on
     setHidden(el.bubbleShape, !(s.screen && s.camera)); // the shape matters exactly when the corner does
 
     var controls = el.setup ? el.setup.elements : [];
@@ -658,7 +760,15 @@
           el.cornerInputs[i].checked = el.cornerInputs[i].value === prefs.corner;
         }
       }
+      // A dragged position comes back after the corners, and then no corner is chosen.
+      var p = prefs.pos;
+      if (isPos(p) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1) {
+        bubblePos = { x: p.x, y: p.y };
+        if (hasPadParts()) bubblePos = clampSetupPos(bubblePos);
+        uncheckCorners();
+      }
     }
+    mountSetupPad();
 
     // Only a choice the person made in the picker can clear a remembered device; a list that merely
     // lacks it (new ids on a new visit, a camera not plugged in yet) never does.
@@ -667,7 +777,7 @@
     });
     showBubbleFile('');
     on(el.bubbleFileInput, 'change', onBubbleFilePicked);
-    on(el.setup, 'change', function () { savePrefs(); syncSetup(); });
+    on(el.setup, 'change', function (event) { onSetupChange(event && event.target); savePrefs(); syncSetup(); });
     on(el.setup, 'submit', function (event) { event.preventDefault(); });
 
     var md = null;
@@ -684,9 +794,187 @@
   function endRun(run) {
     try { Takes.compositor.stop(); } catch (err) { /* already stopped */ }
     try { Takes.capture.stop(); } catch (err2) { /* already stopped */ }
+    // A take that never started (the share picker was cancelled, or the start failed) closes the
+    // floating controls here; once the recorder has started, the floating window closes itself.
+    if (run && !run.recorderStarted) closeFloater();
     if (!run || activeRun === run) activeRun = null;
     starting = false;
+    unmountStagePad();
     syncSetup();
+    syncLiveControls();
+  }
+
+  // ---- the floating controls and the live bubble map
+
+  function floaterSupported() {
+    var F = Takes.floater;
+    try { return !!(F && typeof F.supported === 'function' && F.supported()); } catch (err) { return false; /* treat as missing */ }
+  }
+
+  function floaterOpen() {
+    var F = Takes.floater;
+    try { return !!(F && typeof F.isOpen === 'function' && F.isOpen()); } catch (err) { return false; /* treat as closed */ }
+  }
+
+  function closeFloater() {
+    try { if (Takes.floater && typeof Takes.floater.close === 'function') Takes.floater.close(); } catch (err) { /* already closed */ }
+  }
+
+  /** True when the person shared the whole screen, so the floating window is in the video too. */
+  function isWholeScreen(stream) {
+    try {
+      var track = liveVideoTrack(stream);
+      var settings = track && typeof track.getSettings === 'function' ? track.getSettings() || {} : {};
+      return settings.displaySurface === 'monitor';
+    } catch (err) {
+      return false; // unknown: treat it as a window or tab
+    }
+  }
+
+  /** Where the bubble is in the running take, as the compositor holds it, or null. */
+  function liveLayout() {
+    try { return Takes.compositor.layout(); } catch (err) { return null; /* no picture running */ }
+  }
+
+  /** Everything the floating controls may do to this take. They never reach into this file. */
+  function hooksFor(run) {
+    var streams = run && run.streams ? run.streams : null;
+    var screen = streams && streams.screenStream ? streams.screenStream : null;
+    return {
+      getState: function () { return Takes.recorder.getState(); },
+      elapsed: function () { return Takes.recorder.elapsed(); },
+      pause: function () { Takes.recorder.pause(); },
+      resume: function () { Takes.recorder.resume(); },
+      stop: function () { Takes.recorder.stop(); },
+      download: function () { return downloadTake(run); },
+      openTakes: function () { openTakes(run); },
+      getLayout: liveLayout,
+      moveBubble: function (pos) {
+        try { return Takes.compositor.moveBubble(pos); } catch (err) { return null; /* nothing running */ }
+      },
+      onSettle: function () {
+        // The compositor's own clamped position is the one kept for the next take.
+        var l = liveLayout();
+        if (l && isPos(l.pos)) lastLivePos = { x: l.pos.x, y: l.pos.y };
+      },
+      cameraStream: streams && streams.cameraStream ? streams.cameraStream : null,
+      screenStream: screen,
+      mirror: !!(run && run.want && !run.want.bubbleFromFile),
+      wholeScreen: isWholeScreen(screen)
+    };
+  }
+
+  /** Ask for the floating controls (a window still open from the last take is reused). Call it straight from a click; never awaited. */
+  function openFloater(run) {
+    if (!floaterSupported()) return;
+    var opening;
+    try {
+      opening = Takes.floater.open(hooksFor(run));
+    } catch (err) {
+      opening = null;
+    }
+    floaterOpening = true;
+    syncLiveControls();
+    Promise.resolve(opening).then(function () {
+      floaterOpening = false;
+      syncLiveControls();
+    }, function () {
+      floaterOpening = false;
+      syncLiveControls();
+    });
+  }
+
+  function onPopoutClick() {
+    if (!activeRun || recState === 'idle') return;
+    openFloater(activeRun);
+  }
+
+  /** Focus this tab and show the take: Review when it is still the open recording. */
+  function openTakes(run) {
+    try { root.focus(); } catch (err) { /* the browser decides focus */ }
+    var cur = current();
+    var view = 'record';
+    if (run && run.takeId) view = cur && cur.id === run.takeId ? 'review' : 'library';
+    if (currentView !== view) show(view, true);
+  }
+
+  function unmountStagePad() {
+    if (!stagePad) return;
+    var p = stagePad;
+    stagePad = null;
+    try { p.destroy(); } catch (err) { /* the map is going away anyway */ }
+    setHidden(el.stagePad, true);
+  }
+
+  /** The record page's own map, for when the floating controls are closed or not available. */
+  function mountStagePad(run, layout) {
+    var aspect = Number(layout.width) / Number(layout.height);
+    if (stagePad) {
+      try {
+        stagePad.setAspect(aspect);
+        stagePad.setShape(layout.shape);
+        stagePad.setPos(layout.pos);
+      } catch (err) { /* keeps its last look */ }
+      return;
+    }
+    if (!el.stagePad || !Takes.pad || typeof Takes.pad.mount !== 'function') return;
+    var streams = run.streams || {};
+    var whole = isWholeScreen(streams.screenStream);
+    try {
+      stagePad = Takes.pad.mount(el.stagePad, {
+        doc: root.document,
+        aspect: aspect,
+        shape: layout.shape,
+        size: layout.size,
+        pos: layout.pos,
+        stream: streams.cameraStream || null,
+        // A window or tab share shows behind the bubble; a whole screen would only show this page again.
+        screenStream: whole ? null : streams.screenStream || null,
+        mirror: !!(run.want && !run.want.bubbleFromFile),
+        label: PAD_LABEL,
+        onMove: function (pos) {
+          try { return Takes.compositor.moveBubble(pos) || undefined; } catch (err) { return undefined; /* nothing running */ }
+        }
+      });
+    } catch (err) {
+      stagePad = null;
+      return;
+    }
+    setHidden(el.stagePad, false);
+  }
+
+  /** Bring the Pop out button and the record page's map in line with the take and the floating window. */
+  function syncLiveControls() {
+    var open = floaterOpen();
+    var live = recState === 'recording' || recState === 'paused';
+    setHidden(el.popoutBtn, !(floaterSupported() && !open && !floaterOpening && recState !== 'idle' && activeRun));
+    var layout = live && !open && activeRun ? liveLayout() : null;
+    if (layout) mountStagePad(activeRun, layout);
+    else unmountStagePad();
+  }
+
+  /** The bubble moved in the running take: keep every map in step, and remember it for the next take. */
+  function onBubbleMoved(pos) {
+    if (!isPos(pos)) return;
+    lastLivePos = { x: pos.x, y: pos.y };
+    if (stagePad) {
+      try { stagePad.setPos(pos); } catch (err) { /* keeps its spot */ }
+    }
+    if (setupPad) {
+      try { setupPad.setPos(pos); } catch (err) { /* keeps its spot */ }
+    }
+  }
+
+  /** Once a take ends, its last bubble position becomes the setup choice, remembered once. */
+  function keepLivePos() {
+    if (!lastLivePos || !hasPadParts()) { lastLivePos = null; return; }
+    bubblePos = clampSetupPos(lastLivePos);
+    lastLivePos = null;
+    uncheckCorners();
+    if (setupPad) {
+      try { setupPad.setPos(bubblePos); } catch (err) { /* keeps its spot */ }
+    }
+    savePrefs();
   }
 
   /** The picture source went away: finish the take exactly as if Stop was pressed. */
@@ -747,6 +1035,7 @@
 
     // The screen picker needs this very click, so capture.start is the first thing that happens. No await before it.
     var opening;
+    var threw = false;
     try {
       opening = Takes.capture.start({
         screen: want.screen,
@@ -760,12 +1049,17 @@
         bubbleSound: want.bubbleSound
       });
     } catch (err) {
+      threw = true;
       opening = Promise.reject(err);
     }
+    // The floating controls need this same click too, so they are asked for next, still in the click.
+    // The share picker does not use the click up. Never awaited; the streams reach them once they exist.
+    if (!threw) openFloater(null);
 
-    var run = { want: want, streams: null, aborted: false, ending: false, recorderStarted: false, done: false };
+    var run = { want: want, streams: null, aborted: false, ending: false, recorderStarted: false, done: false, takeId: '' };
     activeRun = run;
     starting = true;
+    lastLivePos = null;
     syncSetup();
 
     Promise.resolve(opening).then(function (streams) {
@@ -778,7 +1072,8 @@
         screenStream: run.streams.screenStream || null,
         cameraStream: run.streams.cameraStream || null,
         // A camera is shown as in a mirror; a video file must not be flipped (its words would read backwards).
-        bubble: { corner: want.corner, size: 'medium', shape: want.shape, mirror: !want.bubbleFromFile }
+        // A dragged position wins over the corner; with none, the corner places it exactly as before.
+        bubble: { corner: want.corner, size: BUBBLE_SIZE, shape: want.shape, mirror: !want.bubbleFromFile, pos: want.pos }
       });
     }).then(function (videoStream) {
       if (run.aborted || activeRun !== run) throw cancelled();
@@ -789,6 +1084,9 @@
       run.recorderStarted = true;
       starting = false;
       syncSetup();
+      // The streams and the bubble now exist: hand them to the floating controls (a no-op when closed).
+      try { if (Takes.floater && typeof Takes.floater.attachRun === 'function') Takes.floater.attachRun(hooksFor(run)); } catch (err) { /* the in-page bar still works */ }
+      syncLiveControls();
     }).catch(function (err) {
       if (run.recorderStarted) return; // the recorder owns the ending from here on
       var silent = err && (err.toasted === true || err.code === 'cancelled');
@@ -837,6 +1135,7 @@
     var run = activeRun;
     if (run) run.done = true;
     endRun(run);
+    keepLivePos();
 
     if (!(Number(payload.durationMs) >= 1000)) {
       // Too short to trim or watch: say so and stay ready to record again.
@@ -846,6 +1145,7 @@
     }
 
     var recording = buildRecording(payload);
+    if (run) run.takeId = recording.id; // the floating controls' Download and Open in Takes mean this take
     sessionTakes[recording.id] = true;
     hideGuide(true);
 
@@ -863,6 +1163,8 @@
     on(el.recordBtn, 'click', onRecordClick);
     Takes.bus.on('capture:ended', onCaptureEnded);
     Takes.bus.on('record:done', onRecordDone);
+    Takes.bus.on('bubble:moved', onBubbleMoved);
+    Takes.bus.on('floater:closed', function () { syncLiveControls(); });
   }
 
   // ================================================================ 8. recording bar
@@ -927,16 +1229,19 @@
         endRun(run);
         if (!run.done && currentView !== 'record') show('record', false);
       }
+      keepLivePos();
     } else {
       updateTimer();
       // Display only. A hidden tab slows this down, which changes nothing in the recording.
       if (timerId === null) timerId = root.setInterval(updateTimer, TIMER_MS);
     }
     syncSetup();
+    syncLiveControls();
   }
 
   function initRecbar() {
     Takes.bus.on('record:state', onRecordState);
+    on(el.popoutBtn, 'click', onPopoutClick);
     on(el.pauseBtn, 'click', function () { Takes.recorder.pause(); });
     on(el.resumeBtn, 'click', function () { Takes.recorder.resume(); });
     on(el.stopBtn, 'click', function () { Takes.recorder.stop(); });
@@ -1695,24 +2000,52 @@
     else emitToast('info', text);
   }
 
-  function onDownloadClick() {
+  var PRODUCT = (Takes && Takes.PRODUCT_NAME) || 'Takes';
+  var DL_NONE = 'There is no recording open to download. Go back to ' + PRODUCT + ' to pick one.';
+  var DL_BUSY = 'A save is already running. Give it a moment, then try again.';
+  var DL_CAPTIONS = 'The captions are still being made. Give it a moment, then download again.';
+  var DL_FAILED = 'The download could not start. Go back to ' + PRODUCT + ' to try again.';
+  var DL_MOVED_ON = 'This take is no longer open in ' + PRODUCT + '. Open it from your Library to download it.';
+
+  /**
+   * Download the recording open in Review: the one path for the Download button and the floating controls.
+   * Promise of { name } when the download started, or { error } in plain words. Never rejects.
+   */
+  function downloadCurrent() {
     var cur = current();
-    if (!cur || saving) return;
-    if (waitingForCaptions(cur)) return;
+    if (!cur) return Promise.resolve({ error: DL_NONE });
+    if (saving) return Promise.resolve({ error: DL_BUSY });
+    if (waitingForCaptions(cur)) return Promise.resolve({ error: DL_CAPTIONS });
     flushEdits();
     flushCues();
     var opts = readSaveOptions(); // read now, at the press
     setSaving(el.saveDownload, true);
-    prepareFile(cur, opts).then(function (file) {
+    return prepareFile(cur, opts).then(function (file) {
       var fileName = Takes.save.download(namedFor(latest(cur), file), file.override);
-      if (!fileName) return; // save.js has already said why
+      if (!fileName) return { error: DL_FAILED }; // save.js has already said why in a toast
       reportSave(cur.id, file.fellBack
         ? 'The edited version could not be made, so the full recording was downloaded as ' + fileName + '.'
         : (file.trimmed ? 'Downloaded the edited recording as ' : 'Downloaded as ') + fileName + '. Look in your Downloads folder.' +
           shortfalls(file));
+      return { name: fileName };
     }).then(null, function () {
       emitToast('error', 'The download could not start. Try again.');
-    }).then(function () { setSaving(el.saveDownload, false); });
+      return { error: DL_FAILED };
+    }).then(function (result) {
+      setSaving(el.saveDownload, false);
+      return result;
+    });
+  }
+
+  /** The floating controls' Download: the take this run made, and only while it is still the open recording. */
+  function downloadTake(run) {
+    var cur = current();
+    if (run && run.takeId && (!cur || cur.id !== run.takeId)) return Promise.resolve({ error: DL_MOVED_ON });
+    return downloadCurrent();
+  }
+
+  function onDownloadClick() {
+    downloadCurrent();
   }
 
   var folderChosen = false;

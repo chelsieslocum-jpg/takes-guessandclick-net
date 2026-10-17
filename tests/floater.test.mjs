@@ -144,7 +144,14 @@ function makeWindow() {
     nextTimer: 1,
     resizes: [],
     closeCalls: 0,
-    resizeTo(width, height) { this.resizes.push([width, height]); this.outerWidth = width; this.outerHeight = height; },
+    // Like a browser: resizeTo sets the outer size and the frame around the page stays the same.
+    resizeTo(width, height) {
+      this.resizes.push([width, height]);
+      this.innerWidth += width - this.outerWidth;
+      this.innerHeight += height - this.outerHeight;
+      this.outerWidth = width;
+      this.outerHeight = height;
+    },
     setInterval(fn, ms) { const id = this.nextTimer++; this.timers.set(id, { fn, ms }); return id; },
     clearInterval(id) { this.timers.delete(id); },
     addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
@@ -173,6 +180,7 @@ function makeDpip(mode) {
       if (this.mode === 'reject') return Promise.reject(new Error('Refused: no user activation'));
       if (this.mode === 'throw') throw new RangeError('bad size');
       const w = makeWindow();
+      if (this.onWindow) this.onWindow(w);
       this.window = w;
       return Promise.resolve(w);
     }
@@ -405,6 +413,123 @@ test('reuse: a window already open on the page is adopted without a second reque
   assert.equal(dpip.calls.length, 0);
   assert.equal(currentView(foreign.document), 'live');
   assert.equal(foreign.document.body.children.filter((c) => c.tagName === 'P').length, 0, 'old content cleared');
+});
+
+// ------------------------------------------------------------------ the remembered window size (SCOPE ADDITION)
+
+/** Give a fake window the size Chrome remembers from a take with the map open: 287 x 260 inside a 16 x 36 frame. */
+function rememberedBig(w) {
+  w.innerWidth = 287;
+  w.innerHeight = 260;
+  w.outerWidth = 303;
+  w.outerHeight = 296;
+}
+
+test('fit: a new window opened at a remembered big size is resized to the slim bar (outer = frame + bar)', async () => {
+  dpip.onWindow = rememberedBig;
+  const w = await openWith(makeHooks());
+  assert.deepEqual(w.resizes, [[16 + 300, 36 + 64]], 'one resizeTo, outer size = frame + the bar');
+  assert.equal(w.innerWidth, 300);
+  assert.equal(w.innerHeight, 64);
+  assert.equal(currentView(w.document), 'live');
+  assert.equal(warns.length, 0);
+});
+
+test('fit: a whole-screen share fits the bar plus the note line in one resize', async () => {
+  dpip.onWindow = rememberedBig;
+  const w = await openWith(makeHooks({ wholeScreen: true }));
+  assert.deepEqual(w.resizes, [[316, 36 + 64 + 24]]);
+  assert.equal(w.innerHeight, 88);
+});
+
+test('fit: a window already at the bar size is left alone', async () => {
+  const w = await openWith(makeHooks());
+  assert.deepEqual(w.resizes, []);
+});
+
+test('fit: resizeTo refused (the click has expired) -> open still resolves true, no warning, the bar still renders', async () => {
+  dpip.onWindow = (w) => {
+    rememberedBig(w);
+    w.resizeTo = function () { this.resizes.push('refused'); const e = new Error('Not allowed'); e.name = 'NotAllowedError'; throw e; };
+  };
+  const hooks = makeHooks({ layout: LAYOUT });
+  assert.equal(await floater.open(hooks), true);
+  const w = dpip.window;
+  assert.deepEqual(w.resizes, ['refused'], 'tried once');
+  assert.equal(warns.length, 0, 'no console noise');
+  assert.equal(w.innerHeight, 260, 'the window keeps its size');
+  emit('recording');
+  assert.equal(currentView(w.document), 'live');
+  assertSlimBar(w.document, { pause: true, move: true });
+  // The map still opens and closes in the bigger window without throwing.
+  one(w.document, 'tk-floater-move').click();
+  assert.equal(padMounts.length, 1);
+  one(w.document, 'tk-floater-move').click();
+  assert.equal(padMounts[0].destroyed, 1);
+  assert.equal(warns.length, 0);
+});
+
+test('fit: a reused window that grew is fitted back to the view it shows', async () => {
+  const hooks = makeHooks();
+  const w = await openWith(hooks);
+  emit('recording');
+  emit('processing');
+  done(4000);
+  emit('idle');
+  assert.equal(currentView(w.document), 'done');
+  // The person drags it bigger, then presses Record again.
+  w.resizes = [];
+  w.innerWidth = 500; w.innerHeight = 400; w.outerWidth = 516; w.outerHeight = 436;
+  assert.equal(await floater.open(makeHooks({ state: 'idle' })), true);
+  assert.equal(dpip.calls.length, 1, 'no second request');
+  assert.equal(currentView(w.document), 'live');
+  assert.deepEqual(w.resizes.at(-1), [316, 100]);
+  assert.equal(w.innerWidth, 300);
+  assert.equal(w.innerHeight, 64);
+});
+
+test('fit: a window already open on the page at a big size is fitted when adopted', async () => {
+  const foreign = makeWindow();
+  rememberedBig(foreign);
+  dpip.window = foreign;
+  assert.equal(await floater.open(makeHooks()), true);
+  assert.equal(dpip.calls.length, 0);
+  assert.deepEqual(foreign.resizes, [[316, 100]]);
+});
+
+test('fit: a refused resize on a reused window is silent too', async () => {
+  const w = await openWith(makeHooks());
+  w.innerWidth = 287; w.innerHeight = 260; w.outerWidth = 303; w.outerHeight = 296;
+  w.resizeTo = function () { throw new Error('Not allowed'); };
+  assert.equal(await floater.open(makeHooks()), true);
+  assert.equal(warns.length, 0);
+  assert.equal(currentView(w.document), 'live');
+});
+
+test('pad height follows the window width: a wide window gets a taller map so the hint line fits', async () => {
+  const hooks = makeHooks({ layout: LAYOUT });
+  const w = await openWith(hooks);
+  emit('recording');
+  // The person widened the window to 400 inside (frame 16 x 36).
+  w.innerWidth = 400; w.outerWidth = 416;
+  const before = w.outerHeight;
+  one(w.document, 'tk-floater-move').click();
+  const grow = Math.round((400 - 24) / (1920 / 1080)) + 40;
+  assert.equal(w.outerHeight - before, grow);
+  assert.ok(grow > Math.round(276 / (1920 / 1080)) + 40, 'taller than the 300-wide map');
+  assert.equal(w.outerWidth, 416, 'width kept');
+  one(w.document, 'tk-floater-move').click();
+  assert.equal(w.outerHeight, before, 'shrinks back by the same amount');
+});
+
+test('pad height falls back to the 276-wide frame when the window has no usable width', async () => {
+  const hooks = makeHooks({ layout: LAYOUT });
+  const w = await openWith(hooks);
+  emit('recording');
+  w.innerWidth = undefined;
+  const before = w.outerHeight;
+  one(w.document, 'tk-floater-move').click();
+  assert.equal(w.outerHeight - before, Math.round(276 / (1920 / 1080)) + 40);
 });
 
 // ------------------------------------------------------------------ the live bar (C6.14)

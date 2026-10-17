@@ -856,6 +856,130 @@ button { cursor: pointer; }
   .tk-record-stage { min-height: 0; }
 }
 
+/* ============================================================ 21. Bubble pad: a small map of the frame with a bubble to drag */
+/* The frame has no border, so its box is exactly the area the bubble is placed in (pad.js measures it).
+   Its line is a ring drawn outside the box, and nothing clips the bubble's focus ring. */
+.tk-pad { display: flex; flex-direction: column; gap: var(--tk-s2); width: 100%; min-width: 0; }
+.tk-pad-frame {
+  position: relative; display: block; width: 100%;
+  background: var(--tk-input); border-radius: var(--tk-radius);
+  box-shadow: 0 0 0 1px var(--tk-line);
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer;
+}
+/* The shared tab or window, behind the bubble, stretched to the frame exactly as the recording places it. */
+.tk-pad-screen {
+  position: absolute; inset: 0; z-index: 0; display: block; width: 100%; height: 100%;
+  object-fit: fill; border-radius: inherit; background: var(--tk-input); pointer-events: none;
+}
+.tk-pad-bubble {
+  position: absolute; z-index: 1; display: block; margin: 0; padding: 0; overflow: hidden;
+  background: var(--tk-surface-2); border: 3px solid var(--tk-accent); border-radius: 50%;
+  box-shadow: 0 4px 14px var(--tk-shade); cursor: grab; touch-action: none;
+  transition: box-shadow var(--tk-fast);
+}
+/* A rectangle's corner radius arrives inline from the geometry; this is only the fallback. */
+.tk-pad-bubble.tk-is-rect { border-radius: var(--tk-radius); }
+/* The placeholder before there is a camera: a soft wash and a head-and-shoulders mark. A live video covers both. */
+.tk-pad-bubble::before { content: ""; position: absolute; inset: 0; background: var(--tk-grad, var(--tk-accent)); opacity: 0.35; pointer-events: none; }
+.tk-pad-bubble::after {
+  content: ""; position: absolute; inset: 0; opacity: 0.55; pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 38%, var(--tk-text) 0 15%, transparent 16%),
+    radial-gradient(ellipse 34% 24% at 50% 90%, var(--tk-text) 0 97%, transparent 100%);
+}
+.tk-pad-video { position: relative; z-index: 1; display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.tk-pad-bubble:hover { box-shadow: 0 0 0 3px var(--tk-accent-mid), 0 4px 14px var(--tk-shade); }
+.tk-pad-bubble.tk-is-dragging, .tk-pad-frame:has(.tk-is-dragging) { cursor: grabbing; }
+.tk-pad-bubble.tk-is-dragging { box-shadow: 0 0 0 3px var(--tk-accent-mid), var(--tk-shadow-2); }
+.tk-pad-bubble:focus-visible { outline-offset: 2px; }
+.tk-pad-hint { color: var(--tk-muted); font-size: var(--tk-fs-sm); line-height: 1.4; text-align: center; }
+
+/* Where the pad lives on the page: under the corner picker in setup, and under the live hint on the stage.
+   Each container is shown and hidden with the hidden attribute, which section 2 makes win over these rules. */
+.tk-pad-field .tk-pad { max-width: 300px; margin-inline: auto; }
+.tk-pad-field .tk-pad-hint { font-size: var(--tk-fs-xs); }
+/* The stage spaces its children far apart for the rings; the pad sits closer under the hint. */
+.tk-stage-pad { width: 100%; max-width: 420px; margin: -72px auto 0; }
+.tk-popout-btn { white-space: nowrap; }
+
+/* ============================================================ 22. Floating controls: the always-on-top bar in its own small window */
+/* The window is asked for at 300 x 64 CSS pixels and everything here fits that with no scrollbar:
+   a 12px side gutter (so the bubble map's frame is the window width minus 24, as floater.js sizes it),
+   one 48px row, and 8px above and below. The page's base styles target .tk-app, which this body does not carry. */
+html:has(> body.tk-floater) { scrollbar-gutter: auto; overflow: hidden; background: var(--tk-bg); }
+body.tk-floater {
+  margin: 0; padding: var(--tk-s2) var(--tk-s3);
+  min-height: 100vh; overflow: hidden;
+  display: flex; flex-direction: column;
+  font-family: var(--tk-font); font-size: var(--tk-fs-sm); line-height: 1.3;
+  color: var(--tk-text); background: var(--tk-bg);
+  -webkit-font-smoothing: antialiased;
+}
+/* A thin signal line across the top while recording. */
+body.tk-floater.tk-is-recording { box-shadow: 0 2px 0 var(--tk-accent) inset; }
+
+.tk-floater-view { display: flex; flex-direction: column; min-width: 0; }
+/* The finished views center in whatever height the window has; if it could not grow, they start at the top instead of clipping the title. */
+.tk-floater-processing, .tk-floater-done, .tk-floater-short, .tk-floater-failed { flex: 1; justify-content: safe center; gap: var(--tk-s1); }
+
+/* The live row: dot, timer, then the buttons pushed to the right. */
+.tk-floater-head { flex: none; display: flex; align-items: center; gap: var(--tk-s2); height: 48px; min-width: 0; }
+.tk-floater-dot { width: 10px; height: 10px; }
+.tk-floater-timer {
+  flex: none; min-width: 4ch; font-size: var(--tk-fs-md); font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+}
+.tk-is-countdown .tk-floater-timer, .tk-is-paused .tk-floater-timer { color: var(--tk-muted); }
+.tk-floater-actions { display: flex; align-items: center; gap: var(--tk-s1); min-width: 0; }
+.tk-floater-head .tk-floater-actions { flex: 1; justify-content: flex-end; margin-left: var(--tk-s1); }
+
+/* Compact buttons. Block display so a label that cannot fit ends in an ellipsis instead of pushing the row wider. */
+body.tk-floater .tk-btn {
+  display: inline-block; min-width: 0; height: 30px; min-height: 30px; padding: 0 var(--tk-s2);
+  border-radius: var(--tk-pill); font-size: var(--tk-fs-xs); line-height: 28px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Pause, Resume and Stop never shrink; "Move bubble" gives way first. */
+.tk-floater-head .tk-btn { flex: 0 0 auto; }
+.tk-floater-head .tk-floater-move { flex: 0 1 auto; }
+.tk-floater-move[aria-expanded="true"] { border-color: var(--tk-accent); color: var(--tk-text); background: var(--tk-accent-soft); }
+/* In the finished views the buttons share one row equally. */
+.tk-floater-done .tk-floater-actions .tk-btn, .tk-floater-short .tk-floater-actions .tk-btn,
+.tk-floater-failed .tk-floater-actions .tk-btn { flex: 1 1 0; }
+
+/* The bubble map, opened by "Move bubble". floater.js grows the window by the frame's height plus 40px:
+   4px above the frame, 4px between frame and hint, a 16px hint line, and spare. */
+.tk-floater-pad { flex: none; padding-top: var(--tk-s1); }
+body.tk-floater .tk-pad { gap: var(--tk-s1); }
+body.tk-floater .tk-pad-hint { font-size: var(--tk-fs-xs); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The whole-screen note: one short line in the 24px the window adds for it. The full sentence is also the row's tooltip. */
+.tk-floater-note {
+  flex: none; color: var(--tk-muted); font-size: calc(var(--tk-fs-xs) * 0.85); line-height: 16px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.tk-floater-title {
+  font-size: var(--tk-fs-sm); font-weight: 700; line-height: 1.25; text-align: center;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.tk-floater-done .tk-floater-title { font-family: var(--tk-font-display, var(--tk-font)); letter-spacing: -0.01em; }
+.tk-floater-processing .tk-floater-title { color: var(--tk-muted); font-weight: 600; }
+.tk-floater-processing .tk-floater-title::before {
+  content: ""; display: inline-block; width: 10px; height: 10px; margin-right: var(--tk-s2); vertical-align: -1px;
+  border: 2px solid var(--tk-accent); border-right-color: transparent; border-radius: 50%;
+  animation: tk-spin 800ms linear infinite;
+}
+.tk-floater-msg {
+  color: var(--tk-muted); font-size: var(--tk-fs-xs); line-height: 1.3; text-align: center; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.tk-floater-msg:empty { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  body.tk-floater .tk-floater-dot, .tk-floater-processing .tk-floater-title::before { animation: none; }
+}
+
 /* Outfit, by the Outfit Project Authors, SIL Open Font License 1.1. Latin subset, all weights in one file.
    Embedded so the single file needs no font server. The source file is src/fonts/outfit-latin.woff2; the license text is src/fonts/OFL.txt. */
 @font-face {
@@ -1136,7 +1260,7 @@ button { cursor: pointer; }
         </fieldset>
 
         <fieldset class="tk-fieldset tk-corner-group" id="tk-corners">
-          <legend class="tk-legend">Camera bubble corner</legend>
+          <legend class="tk-legend">Quick corners</legend>
           <label class="tk-corner" for="tk-corner-tl">
             <input class="tk-corner-input" type="radio" id="tk-corner-tl" name="tk-bubble-corner" value="top-left">
             <span class="tk-corner-label">Top left</span>
@@ -1155,6 +1279,8 @@ button { cursor: pointer; }
           </label>
         </fieldset>
 
+        <div class="tk-field tk-pad-field" id="tk-pad-field"><span class="tk-label" id="tk-pad-label">Bubble position</span><div id="tk-setup-pad" role="group" aria-labelledby="tk-pad-label"></div></div>
+
         <p class="tk-note" id="tk-setup-note" hidden></p>
       </form>
 
@@ -1169,7 +1295,8 @@ button { cursor: pointer; }
           <span class="tk-record-label" id="tk-record-label">Record</span>
         </button>
         <p class="tk-record-hint" id="tk-record-hint">Your browser asks what to share. Recording starts after a 3-second countdown.</p>
-        <p class="tk-record-hint" id="tk-record-live" role="status" hidden>Recording. Switch to what you want to show. Come back to this tab, or use your browser's Stop sharing bar, to finish.</p>
+        <p class="tk-record-hint" id="tk-record-live" role="status" hidden>Recording. Use the floating controls, or come back to this tab, to pause or stop.</p>
+        <div class="tk-stage-pad" id="tk-stage-pad" hidden></div>
 
         <div class="tk-countdown" id="tk-countdown" role="status" aria-live="assertive" hidden>
           <span class="tk-sr-only">Recording starts in</span>
@@ -1186,6 +1313,7 @@ button { cursor: pointer; }
     <span class="tk-recbar-status" id="tk-rec-status" role="status" aria-live="polite">Recording</span>
     <span class="tk-recbar-timer" id="tk-rec-timer" role="timer" aria-label="Recording time">0:00</span>
     <div class="tk-recbar-actions" id="tk-recbar-actions">
+      <button type="button" class="tk-btn tk-popout-btn" id="tk-popout-btn" hidden>Pop out controls</button>
       <button type="button" class="tk-btn" id="tk-pause-btn">Pause</button>
       <button type="button" class="tk-btn" id="tk-resume-btn" hidden>Resume</button>
       <button type="button" class="tk-btn tk-btn-primary" id="tk-stop-btn">Stop</button>
@@ -1378,6 +1506,9 @@ button { cursor: pointer; }
           <li>Captions show on the video here and save as a separate .vtt file. To draw them into the video too, tick &quot;Burn captions into the video&quot; under Save options.</li>
           <li>The camera bubble can show a video file you choose in place of your live camera.</li>
           <li>The camera bubble can be a circle or a rectangle.</li>
+          <li>Stop, Pause and Download float on top of your other windows while you record (Chrome and Edge).</li>
+          <li>Drag the camera bubble anywhere, before or during a recording.</li>
+          <li>If you share your whole screen, the floating controls show in the video. Share a window or tab to keep them out.</li>
           <li>The transcript can be searched, copied and saved as text or subtitles.</li>
           <li>When you save, you can burn the captions into the video and choose a tall 9:16 shape for social posts.</li>
           <li>The cloud folder gives you a file. You make the share link in Google Drive, OneDrive, Dropbox or iCloud.</li>
@@ -6740,6 +6871,7 @@ button { cursor: pointer; }
   var lastSecondsLeft;
   var gotDone = false;     // record:done arrived for the take on screen
   var extra = 0;           // height added to the window on top of the bar, in CSS pixels
+  var fitting = false;     // a fresh or reused window is being sized as a whole, so setExtra only records
   var busy = false;        // a download asked for from this window has not answered yet
   var generation = 0;      // goes up on every close, so a window that arrives late is closed again
   var pending = null;      // the open that is waiting for the browser
@@ -6841,10 +6973,21 @@ button { cursor: pointer; }
 
   // ---------------------------------------------------------------- window size
 
+  /**
+   * How wide the bubble map's frame is: the window's inner width less the side padding, so a window
+   * wider than the bar gets a taller map and the hint line under it still fits. While a window is
+   * being fitted it is about to become the bar's width, so that width is used.
+   */
+  function padFrameWidth() {
+    var w = fitting ? NaN : Number(win && win.innerWidth);
+    if (!isFinite(w) || !(w > PAD_SIDE)) w = BAR_SIZE.width;
+    return w - PAD_SIDE;
+  }
+
   function liveExtra() {
     var px = hooks && hooks.wholeScreen ? NOTE_EXTRA : 0;
     if (padOpen) {
-      px += Math.round((BAR_SIZE.width - PAD_SIDE) / aspectOf(readLayout())) + PAD_HINT;
+      px += Math.round(padFrameWidth() / aspectOf(readLayout())) + PAD_HINT;
     }
     return px;
   }
@@ -6852,6 +6995,7 @@ button { cursor: pointer; }
   /** Grow or shrink the window so it has px of height on top of the bar. A refused resize changes nothing. */
   function setExtra(px) {
     var delta = px - extra;
+    if (fitting) { extra = px; return; }   // fitWindow sets the whole size once the view is known
     if (!win || delta === 0 || typeof win.resizeTo !== 'function') return;
     var w = Number(win.outerWidth);
     var h = Number(win.outerHeight);
@@ -6863,6 +7007,36 @@ button { cursor: pointer; }
       win.resizeTo(Math.round(w), Math.round(h + delta));
       extra = px;
     } catch (err) { /* resizing needs a click; without one the window keeps its size */ }
+  }
+
+  /**
+   * Size the window to exactly what the current view needs. Chrome and Edge reopen the
+   * Picture-in-Picture window at the size it last had (a take with the map open leaves it big) and
+   * ignore the size requestWindow asked for, so this runs as soon as a window is attached or reused,
+   * still inside the click. resizeTo sets the OUTER size, so the browser's own frame is added on.
+   * A refused resize (the click's permission has run out) is silent: the CSS fits a bigger window.
+   */
+  function fitWindow() {
+    if (!win || typeof win.resizeTo !== 'function') return;
+    var wantW = BAR_SIZE.width;
+    var wantH = BAR_SIZE.height + extra;
+    var ow = Number(win.outerWidth);
+    var oh = Number(win.outerHeight);
+    var iw = Number(win.innerWidth);
+    var ih = Number(win.innerHeight);
+    if (!(isFinite(ow) && isFinite(oh) && isFinite(iw) && isFinite(ih))) return;
+    if (!(iw > 0 && ih > 0 && ow >= iw && oh >= ih)) return;
+    if (Math.round(iw) === wantW && Math.round(ih) === wantH) return;
+    try {
+      win.resizeTo(Math.round(ow - iw + wantW), Math.round(oh - ih + wantH));
+    } catch (err) { /* no click left to resize with; the bar's CSS handles the bigger window */ }
+  }
+
+  /** Show the view that matches the recorder, then size the whole window to it in one step. */
+  function syncAndFit() {
+    fitting = true;
+    try { syncToState(); } finally { fitting = false; }
+    fitWindow();
   }
 
   // ---------------------------------------------------------------- the bubble map
@@ -7207,7 +7381,7 @@ button { cursor: pointer; }
       Takes.bus.on('record:done', onDone),
       Takes.bus.on('bubble:moved', onMoved)
     ];
-    syncToState();
+    syncAndFit();
   }
 
   /** Let go of the window: the map, the timer, the listeners. Safe to call twice. */
@@ -7260,7 +7434,7 @@ button { cursor: pointer; }
     var existing = null;
     try { existing = dpip.window || null; } catch (err) { existing = null; /* treat as none open */ }
     if (existing) {
-      if (existing === win) syncToState();
+      if (existing === win) syncAndFit();
       else { teardown(); attach(existing); }
       return Promise.resolve(true);
     }
@@ -7377,6 +7551,20 @@ button { cursor: pointer; }
   var baseTitle = '';                // the tab title when nothing is being recorded
   var toasts = [];          // { node, text, timer }
 
+  // The camera bubble's place. The setup map is a 1920 x 1080 frame; positions are the bubble's
+  // center as fractions of the frame, so they carry over to a recording of any size.
+  var SETUP_W = 1920;
+  var SETUP_H = 1080;
+  var BUBBLE_SIZE = 'medium';
+  var PAD_LABEL = 'Camera bubble position';
+  // Said on the stage when the browser has no floating controls.
+  var LIVE_TEXT_NO_FLOATER = 'Recording. Switch to what you want to show. Come back to this tab, or use your browser\'s Stop sharing bar, to finish.';
+  var bubblePos = null;     // a position the person dragged to, or null when a corner is used
+  var lastLivePos = null;   // where the bubble was moved to during the take, kept for the next one
+  var setupPad = null;      // the map in the setup panel
+  var stagePad = null;      // the map on the record page while the floating controls are closed
+  var floaterOpening = false; // the floating controls were asked for and the browser has not answered
+
   // ================================================================ 1. small tools
 
   function byId(id) {
@@ -7418,9 +7606,12 @@ button { cursor: pointer; }
     for (var c = 0; c < el.cornerInputs.length; c++) {
       if (el.cornerInputs[c] && el.cornerInputs[c].checked) defaultCorner = el.cornerInputs[c].value;
     }
+    el.padField = byId('tk-pad-field');
+    el.setupPadBox = byId('tk-setup-pad');
     el.setupNote = byId('tk-setup-note');
     el.recordHint = byId('tk-record-hint');
     el.recordLive = byId('tk-record-live');
+    el.stagePad = byId('tk-stage-pad');
     liveText = el.recordLive ? el.recordLive.textContent : '';
     el.captionsFileNote = byId('tk-captions-file-note');
     el.recordBtn = byId('tk-record-btn');
@@ -7430,6 +7621,7 @@ button { cursor: pointer; }
     el.recbar = byId('tk-recbar');
     el.recStatus = byId('tk-rec-status');
     el.recTimer = byId('tk-rec-timer');
+    el.popoutBtn = byId('tk-popout-btn');
     el.pauseBtn = byId('tk-pause-btn');
     el.resumeBtn = byId('tk-resume-btn');
     el.stopBtn = byId('tk-stop-btn');
@@ -7679,6 +7871,7 @@ button { cursor: pointer; }
       message = 'This browser cannot record MP4 video. Please update Chrome or Edge.';
     }
     capsOk = message === '';
+    if (!floaterSupported()) liveText = LIVE_TEXT_NO_FLOATER; // never point at controls that cannot appear
     if (!capsOk) {
       el.bannerText.textContent = message;
       // The same recorder is online; a browser that cannot run this file is offered that page.
@@ -7763,6 +7956,85 @@ button { cursor: pointer; }
     return defaultCorner;
   }
 
+  function setupShape() {
+    return el.bubbleShapeRect && el.bubbleShapeRect.checked ? 'rectangle' : 'circle';
+  }
+
+  function isPos(pos) {
+    return !!pos && typeof pos === 'object' &&
+      typeof pos.x === 'number' && isFinite(pos.x) &&
+      typeof pos.y === 'number' && isFinite(pos.y);
+  }
+
+  function hasPadParts() {
+    var C = Takes.compositor;
+    return !!(Takes.pad && typeof Takes.pad.mount === 'function' && C &&
+      typeof C.clampPos === 'function' && typeof C.cornerPos === 'function');
+  }
+
+  /** A position held inside the setup frame, the way a recording would hold it. */
+  function clampSetupPos(pos) {
+    return Takes.compositor.clampPos(SETUP_W, SETUP_H, BUBBLE_SIZE, setupShape(), pos);
+  }
+
+  /** Where the setup map shows the bubble: the dragged position, or the chosen corner's. */
+  function shownSetupPos() {
+    if (bubblePos) return { x: bubblePos.x, y: bubblePos.y };
+    return Takes.compositor.cornerPos(SETUP_W, SETUP_H, chosenCorner(), BUBBLE_SIZE, setupShape());
+  }
+
+  function uncheckCorners() {
+    for (var i = 0; i < el.cornerInputs.length; i++) {
+      if (el.cornerInputs[i]) el.cornerInputs[i].checked = false;
+    }
+  }
+
+  function setupBusy() {
+    return starting || recState !== 'idle' || !capsOk;
+  }
+
+  /** The setup map: dragging it sets a free position and clears the corner choice. */
+  function mountSetupPad() {
+    if (setupPad || !el.setupPadBox || !hasPadParts()) return;
+    try {
+      setupPad = Takes.pad.mount(el.setupPadBox, {
+        doc: root.document,
+        aspect: SETUP_W / SETUP_H,
+        shape: setupShape(),
+        size: BUBBLE_SIZE,
+        pos: shownSetupPos(),
+        label: PAD_LABEL,
+        onMove: function (pos) {
+          // While a take is being set up or made, the setup map holds still.
+          if (setupBusy()) return lastLivePos || shownSetupPos();
+          bubblePos = clampSetupPos(pos);
+          uncheckCorners();
+          return { x: bubblePos.x, y: bubblePos.y };
+        },
+        onSettle: function () {
+          // Remembered once the drag ends, never on every move.
+          if (setupBusy() || !bubblePos) return;
+          savePrefs();
+        }
+      });
+    } catch (err) {
+      setupPad = null; // the corners still work without the map
+    }
+  }
+
+  /** Keep the setup map in step with a corner or shape the person just picked. */
+  function onSetupChange(target) {
+    var isCorner = false;
+    for (var i = 0; i < el.cornerInputs.length; i++) if (target === el.cornerInputs[i]) isCorner = true;
+    if (isCorner) bubblePos = null; // a corner is today's exact placement
+    if (!setupPad) return;
+    if (target === el.bubbleShapeCircle || target === el.bubbleShapeRect) {
+      setupPad.setShape(setupShape());
+      if (bubblePos) bubblePos = clampSetupPos(bubblePos);
+    }
+    if (isCorner || target === el.bubbleShapeCircle || target === el.bubbleShapeRect) setupPad.setPos(shownSetupPos());
+  }
+
   function readSetup() {
     return {
       screen: !!el.srcScreen.checked,
@@ -7773,7 +8045,8 @@ button { cursor: pointer; }
       micId: el.srcMic.checked ? wantedDevice(el.micSelect, 'micId', 'micLabel').id : '',
       micLabel: el.srcMic.checked ? wantedDevice(el.micSelect, 'micId', 'micLabel').label : '',
       corner: chosenCorner(),
-      shape: el.bubbleShapeRect && el.bubbleShapeRect.checked ? 'rectangle' : 'circle',
+      pos: bubblePos ? { x: bubblePos.x, y: bubblePos.y } : null, // null: the corner decides
+      shape: setupShape(),
       // The bubble can show a video file in place of the live camera; it still needs the Camera chip on.
       bubbleFromFile: !!el.srcCamera.checked && !!el.bubbleFileRadio.checked,
       bubbleSound: !!el.bubbleSound.checked
@@ -7836,7 +8109,7 @@ button { cursor: pointer; }
     var old = recall(KEY_PREFS) || {};
     var camera = chosenDevice(el.cameraSelect, old.cameraId, old.cameraLabel);
     var mic = chosenDevice(el.micSelect, old.micId, old.micLabel);
-    remember(KEY_PREFS, {
+    var prefs = {
       screen: s.screen,
       camera: s.camera,
       mic: s.mic,
@@ -7848,7 +8121,9 @@ button { cursor: pointer; }
       shape: s.shape,
       bubble: el.bubbleFileRadio.checked ? 'file' : 'camera',
       bubbleSound: s.bubbleSound
-    });
+    };
+    if (s.pos) prefs.pos = { x: s.pos.x, y: s.pos.y }; // only a dragged position; a corner leaves it out
+    remember(KEY_PREFS, prefs);
   }
 
   /**
@@ -7889,6 +8164,7 @@ button { cursor: pointer; }
     setHidden(el.cameraField, !s.camera || s.bubbleFromFile); // a video file needs no camera
     setHidden(el.micField, !s.mic);
     setHidden(el.corners, !(s.screen && s.camera));
+    setHidden(el.padField, !(s.screen && s.camera)); // the map, like the corners, needs a screen to place the bubble on
     setHidden(el.bubbleShape, !(s.screen && s.camera)); // the shape matters exactly when the corner does
 
     var controls = el.setup ? el.setup.elements : [];
@@ -7979,7 +8255,15 @@ button { cursor: pointer; }
           el.cornerInputs[i].checked = el.cornerInputs[i].value === prefs.corner;
         }
       }
+      // A dragged position comes back after the corners, and then no corner is chosen.
+      var p = prefs.pos;
+      if (isPos(p) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1) {
+        bubblePos = { x: p.x, y: p.y };
+        if (hasPadParts()) bubblePos = clampSetupPos(bubblePos);
+        uncheckCorners();
+      }
     }
+    mountSetupPad();
 
     // Only a choice the person made in the picker can clear a remembered device; a list that merely
     // lacks it (new ids on a new visit, a camera not plugged in yet) never does.
@@ -7988,7 +8272,7 @@ button { cursor: pointer; }
     });
     showBubbleFile('');
     on(el.bubbleFileInput, 'change', onBubbleFilePicked);
-    on(el.setup, 'change', function () { savePrefs(); syncSetup(); });
+    on(el.setup, 'change', function (event) { onSetupChange(event && event.target); savePrefs(); syncSetup(); });
     on(el.setup, 'submit', function (event) { event.preventDefault(); });
 
     var md = null;
@@ -8005,9 +8289,187 @@ button { cursor: pointer; }
   function endRun(run) {
     try { Takes.compositor.stop(); } catch (err) { /* already stopped */ }
     try { Takes.capture.stop(); } catch (err2) { /* already stopped */ }
+    // A take that never started (the share picker was cancelled, or the start failed) closes the
+    // floating controls here; once the recorder has started, the floating window closes itself.
+    if (run && !run.recorderStarted) closeFloater();
     if (!run || activeRun === run) activeRun = null;
     starting = false;
+    unmountStagePad();
     syncSetup();
+    syncLiveControls();
+  }
+
+  // ---- the floating controls and the live bubble map
+
+  function floaterSupported() {
+    var F = Takes.floater;
+    try { return !!(F && typeof F.supported === 'function' && F.supported()); } catch (err) { return false; /* treat as missing */ }
+  }
+
+  function floaterOpen() {
+    var F = Takes.floater;
+    try { return !!(F && typeof F.isOpen === 'function' && F.isOpen()); } catch (err) { return false; /* treat as closed */ }
+  }
+
+  function closeFloater() {
+    try { if (Takes.floater && typeof Takes.floater.close === 'function') Takes.floater.close(); } catch (err) { /* already closed */ }
+  }
+
+  /** True when the person shared the whole screen, so the floating window is in the video too. */
+  function isWholeScreen(stream) {
+    try {
+      var track = liveVideoTrack(stream);
+      var settings = track && typeof track.getSettings === 'function' ? track.getSettings() || {} : {};
+      return settings.displaySurface === 'monitor';
+    } catch (err) {
+      return false; // unknown: treat it as a window or tab
+    }
+  }
+
+  /** Where the bubble is in the running take, as the compositor holds it, or null. */
+  function liveLayout() {
+    try { return Takes.compositor.layout(); } catch (err) { return null; /* no picture running */ }
+  }
+
+  /** Everything the floating controls may do to this take. They never reach into this file. */
+  function hooksFor(run) {
+    var streams = run && run.streams ? run.streams : null;
+    var screen = streams && streams.screenStream ? streams.screenStream : null;
+    return {
+      getState: function () { return Takes.recorder.getState(); },
+      elapsed: function () { return Takes.recorder.elapsed(); },
+      pause: function () { Takes.recorder.pause(); },
+      resume: function () { Takes.recorder.resume(); },
+      stop: function () { Takes.recorder.stop(); },
+      download: function () { return downloadTake(run); },
+      openTakes: function () { openTakes(run); },
+      getLayout: liveLayout,
+      moveBubble: function (pos) {
+        try { return Takes.compositor.moveBubble(pos); } catch (err) { return null; /* nothing running */ }
+      },
+      onSettle: function () {
+        // The compositor's own clamped position is the one kept for the next take.
+        var l = liveLayout();
+        if (l && isPos(l.pos)) lastLivePos = { x: l.pos.x, y: l.pos.y };
+      },
+      cameraStream: streams && streams.cameraStream ? streams.cameraStream : null,
+      screenStream: screen,
+      mirror: !!(run && run.want && !run.want.bubbleFromFile),
+      wholeScreen: isWholeScreen(screen)
+    };
+  }
+
+  /** Ask for the floating controls (a window still open from the last take is reused). Call it straight from a click; never awaited. */
+  function openFloater(run) {
+    if (!floaterSupported()) return;
+    var opening;
+    try {
+      opening = Takes.floater.open(hooksFor(run));
+    } catch (err) {
+      opening = null;
+    }
+    floaterOpening = true;
+    syncLiveControls();
+    Promise.resolve(opening).then(function () {
+      floaterOpening = false;
+      syncLiveControls();
+    }, function () {
+      floaterOpening = false;
+      syncLiveControls();
+    });
+  }
+
+  function onPopoutClick() {
+    if (!activeRun || recState === 'idle') return;
+    openFloater(activeRun);
+  }
+
+  /** Focus this tab and show the take: Review when it is still the open recording. */
+  function openTakes(run) {
+    try { root.focus(); } catch (err) { /* the browser decides focus */ }
+    var cur = current();
+    var view = 'record';
+    if (run && run.takeId) view = cur && cur.id === run.takeId ? 'review' : 'library';
+    if (currentView !== view) show(view, true);
+  }
+
+  function unmountStagePad() {
+    if (!stagePad) return;
+    var p = stagePad;
+    stagePad = null;
+    try { p.destroy(); } catch (err) { /* the map is going away anyway */ }
+    setHidden(el.stagePad, true);
+  }
+
+  /** The record page's own map, for when the floating controls are closed or not available. */
+  function mountStagePad(run, layout) {
+    var aspect = Number(layout.width) / Number(layout.height);
+    if (stagePad) {
+      try {
+        stagePad.setAspect(aspect);
+        stagePad.setShape(layout.shape);
+        stagePad.setPos(layout.pos);
+      } catch (err) { /* keeps its last look */ }
+      return;
+    }
+    if (!el.stagePad || !Takes.pad || typeof Takes.pad.mount !== 'function') return;
+    var streams = run.streams || {};
+    var whole = isWholeScreen(streams.screenStream);
+    try {
+      stagePad = Takes.pad.mount(el.stagePad, {
+        doc: root.document,
+        aspect: aspect,
+        shape: layout.shape,
+        size: layout.size,
+        pos: layout.pos,
+        stream: streams.cameraStream || null,
+        // A window or tab share shows behind the bubble; a whole screen would only show this page again.
+        screenStream: whole ? null : streams.screenStream || null,
+        mirror: !!(run.want && !run.want.bubbleFromFile),
+        label: PAD_LABEL,
+        onMove: function (pos) {
+          try { return Takes.compositor.moveBubble(pos) || undefined; } catch (err) { return undefined; /* nothing running */ }
+        }
+      });
+    } catch (err) {
+      stagePad = null;
+      return;
+    }
+    setHidden(el.stagePad, false);
+  }
+
+  /** Bring the Pop out button and the record page's map in line with the take and the floating window. */
+  function syncLiveControls() {
+    var open = floaterOpen();
+    var live = recState === 'recording' || recState === 'paused';
+    setHidden(el.popoutBtn, !(floaterSupported() && !open && !floaterOpening && recState !== 'idle' && activeRun));
+    var layout = live && !open && activeRun ? liveLayout() : null;
+    if (layout) mountStagePad(activeRun, layout);
+    else unmountStagePad();
+  }
+
+  /** The bubble moved in the running take: keep every map in step, and remember it for the next take. */
+  function onBubbleMoved(pos) {
+    if (!isPos(pos)) return;
+    lastLivePos = { x: pos.x, y: pos.y };
+    if (stagePad) {
+      try { stagePad.setPos(pos); } catch (err) { /* keeps its spot */ }
+    }
+    if (setupPad) {
+      try { setupPad.setPos(pos); } catch (err) { /* keeps its spot */ }
+    }
+  }
+
+  /** Once a take ends, its last bubble position becomes the setup choice, remembered once. */
+  function keepLivePos() {
+    if (!lastLivePos || !hasPadParts()) { lastLivePos = null; return; }
+    bubblePos = clampSetupPos(lastLivePos);
+    lastLivePos = null;
+    uncheckCorners();
+    if (setupPad) {
+      try { setupPad.setPos(bubblePos); } catch (err) { /* keeps its spot */ }
+    }
+    savePrefs();
   }
 
   /** The picture source went away: finish the take exactly as if Stop was pressed. */
@@ -8068,6 +8530,7 @@ button { cursor: pointer; }
 
     // The screen picker needs this very click, so capture.start is the first thing that happens. No await before it.
     var opening;
+    var threw = false;
     try {
       opening = Takes.capture.start({
         screen: want.screen,
@@ -8081,12 +8544,17 @@ button { cursor: pointer; }
         bubbleSound: want.bubbleSound
       });
     } catch (err) {
+      threw = true;
       opening = Promise.reject(err);
     }
+    // The floating controls need this same click too, so they are asked for next, still in the click.
+    // The share picker does not use the click up. Never awaited; the streams reach them once they exist.
+    if (!threw) openFloater(null);
 
-    var run = { want: want, streams: null, aborted: false, ending: false, recorderStarted: false, done: false };
+    var run = { want: want, streams: null, aborted: false, ending: false, recorderStarted: false, done: false, takeId: '' };
     activeRun = run;
     starting = true;
+    lastLivePos = null;
     syncSetup();
 
     Promise.resolve(opening).then(function (streams) {
@@ -8099,7 +8567,8 @@ button { cursor: pointer; }
         screenStream: run.streams.screenStream || null,
         cameraStream: run.streams.cameraStream || null,
         // A camera is shown as in a mirror; a video file must not be flipped (its words would read backwards).
-        bubble: { corner: want.corner, size: 'medium', shape: want.shape, mirror: !want.bubbleFromFile }
+        // A dragged position wins over the corner; with none, the corner places it exactly as before.
+        bubble: { corner: want.corner, size: BUBBLE_SIZE, shape: want.shape, mirror: !want.bubbleFromFile, pos: want.pos }
       });
     }).then(function (videoStream) {
       if (run.aborted || activeRun !== run) throw cancelled();
@@ -8110,6 +8579,9 @@ button { cursor: pointer; }
       run.recorderStarted = true;
       starting = false;
       syncSetup();
+      // The streams and the bubble now exist: hand them to the floating controls (a no-op when closed).
+      try { if (Takes.floater && typeof Takes.floater.attachRun === 'function') Takes.floater.attachRun(hooksFor(run)); } catch (err) { /* the in-page bar still works */ }
+      syncLiveControls();
     }).catch(function (err) {
       if (run.recorderStarted) return; // the recorder owns the ending from here on
       var silent = err && (err.toasted === true || err.code === 'cancelled');
@@ -8158,6 +8630,7 @@ button { cursor: pointer; }
     var run = activeRun;
     if (run) run.done = true;
     endRun(run);
+    keepLivePos();
 
     if (!(Number(payload.durationMs) >= 1000)) {
       // Too short to trim or watch: say so and stay ready to record again.
@@ -8167,6 +8640,7 @@ button { cursor: pointer; }
     }
 
     var recording = buildRecording(payload);
+    if (run) run.takeId = recording.id; // the floating controls' Download and Open in Takes mean this take
     sessionTakes[recording.id] = true;
     hideGuide(true);
 
@@ -8184,6 +8658,8 @@ button { cursor: pointer; }
     on(el.recordBtn, 'click', onRecordClick);
     Takes.bus.on('capture:ended', onCaptureEnded);
     Takes.bus.on('record:done', onRecordDone);
+    Takes.bus.on('bubble:moved', onBubbleMoved);
+    Takes.bus.on('floater:closed', function () { syncLiveControls(); });
   }
 
   // ================================================================ 8. recording bar
@@ -8248,16 +8724,19 @@ button { cursor: pointer; }
         endRun(run);
         if (!run.done && currentView !== 'record') show('record', false);
       }
+      keepLivePos();
     } else {
       updateTimer();
       // Display only. A hidden tab slows this down, which changes nothing in the recording.
       if (timerId === null) timerId = root.setInterval(updateTimer, TIMER_MS);
     }
     syncSetup();
+    syncLiveControls();
   }
 
   function initRecbar() {
     Takes.bus.on('record:state', onRecordState);
+    on(el.popoutBtn, 'click', onPopoutClick);
     on(el.pauseBtn, 'click', function () { Takes.recorder.pause(); });
     on(el.resumeBtn, 'click', function () { Takes.recorder.resume(); });
     on(el.stopBtn, 'click', function () { Takes.recorder.stop(); });
@@ -9016,24 +9495,52 @@ button { cursor: pointer; }
     else emitToast('info', text);
   }
 
-  function onDownloadClick() {
+  var PRODUCT = (Takes && Takes.PRODUCT_NAME) || 'Takes';
+  var DL_NONE = 'There is no recording open to download. Go back to ' + PRODUCT + ' to pick one.';
+  var DL_BUSY = 'A save is already running. Give it a moment, then try again.';
+  var DL_CAPTIONS = 'The captions are still being made. Give it a moment, then download again.';
+  var DL_FAILED = 'The download could not start. Go back to ' + PRODUCT + ' to try again.';
+  var DL_MOVED_ON = 'This take is no longer open in ' + PRODUCT + '. Open it from your Library to download it.';
+
+  /**
+   * Download the recording open in Review: the one path for the Download button and the floating controls.
+   * Promise of { name } when the download started, or { error } in plain words. Never rejects.
+   */
+  function downloadCurrent() {
     var cur = current();
-    if (!cur || saving) return;
-    if (waitingForCaptions(cur)) return;
+    if (!cur) return Promise.resolve({ error: DL_NONE });
+    if (saving) return Promise.resolve({ error: DL_BUSY });
+    if (waitingForCaptions(cur)) return Promise.resolve({ error: DL_CAPTIONS });
     flushEdits();
     flushCues();
     var opts = readSaveOptions(); // read now, at the press
     setSaving(el.saveDownload, true);
-    prepareFile(cur, opts).then(function (file) {
+    return prepareFile(cur, opts).then(function (file) {
       var fileName = Takes.save.download(namedFor(latest(cur), file), file.override);
-      if (!fileName) return; // save.js has already said why
+      if (!fileName) return { error: DL_FAILED }; // save.js has already said why in a toast
       reportSave(cur.id, file.fellBack
         ? 'The edited version could not be made, so the full recording was downloaded as ' + fileName + '.'
         : (file.trimmed ? 'Downloaded the edited recording as ' : 'Downloaded as ') + fileName + '. Look in your Downloads folder.' +
           shortfalls(file));
+      return { name: fileName };
     }).then(null, function () {
       emitToast('error', 'The download could not start. Try again.');
-    }).then(function () { setSaving(el.saveDownload, false); });
+      return { error: DL_FAILED };
+    }).then(function (result) {
+      setSaving(el.saveDownload, false);
+      return result;
+    });
+  }
+
+  /** The floating controls' Download: the take this run made, and only while it is still the open recording. */
+  function downloadTake(run) {
+    var cur = current();
+    if (run && run.takeId && (!cur || cur.id !== run.takeId)) return Promise.resolve({ error: DL_MOVED_ON });
+    return downloadCurrent();
+  }
+
+  function onDownloadClick() {
+    downloadCurrent();
   }
 
   var folderChosen = false;

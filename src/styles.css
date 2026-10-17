@@ -847,3 +847,127 @@ button { cursor: pointer; }
   #tk-bubble-file-field { padding: var(--tk-s2) var(--tk-s3); gap: var(--tk-s1); }
   .tk-record-stage { min-height: 0; }
 }
+
+/* ============================================================ 21. Bubble pad: a small map of the frame with a bubble to drag */
+/* The frame has no border, so its box is exactly the area the bubble is placed in (pad.js measures it).
+   Its line is a ring drawn outside the box, and nothing clips the bubble's focus ring. */
+.tk-pad { display: flex; flex-direction: column; gap: var(--tk-s2); width: 100%; min-width: 0; }
+.tk-pad-frame {
+  position: relative; display: block; width: 100%;
+  background: var(--tk-input); border-radius: var(--tk-radius);
+  box-shadow: 0 0 0 1px var(--tk-line);
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer;
+}
+/* The shared tab or window, behind the bubble, stretched to the frame exactly as the recording places it. */
+.tk-pad-screen {
+  position: absolute; inset: 0; z-index: 0; display: block; width: 100%; height: 100%;
+  object-fit: fill; border-radius: inherit; background: var(--tk-input); pointer-events: none;
+}
+.tk-pad-bubble {
+  position: absolute; z-index: 1; display: block; margin: 0; padding: 0; overflow: hidden;
+  background: var(--tk-surface-2); border: 3px solid var(--tk-accent); border-radius: 50%;
+  box-shadow: 0 4px 14px var(--tk-shade); cursor: grab; touch-action: none;
+  transition: box-shadow var(--tk-fast);
+}
+/* A rectangle's corner radius arrives inline from the geometry; this is only the fallback. */
+.tk-pad-bubble.tk-is-rect { border-radius: var(--tk-radius); }
+/* The placeholder before there is a camera: a soft wash and a head-and-shoulders mark. A live video covers both. */
+.tk-pad-bubble::before { content: ""; position: absolute; inset: 0; background: var(--tk-grad, var(--tk-accent)); opacity: 0.35; pointer-events: none; }
+.tk-pad-bubble::after {
+  content: ""; position: absolute; inset: 0; opacity: 0.55; pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 38%, var(--tk-text) 0 15%, transparent 16%),
+    radial-gradient(ellipse 34% 24% at 50% 90%, var(--tk-text) 0 97%, transparent 100%);
+}
+.tk-pad-video { position: relative; z-index: 1; display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.tk-pad-bubble:hover { box-shadow: 0 0 0 3px var(--tk-accent-mid), 0 4px 14px var(--tk-shade); }
+.tk-pad-bubble.tk-is-dragging, .tk-pad-frame:has(.tk-is-dragging) { cursor: grabbing; }
+.tk-pad-bubble.tk-is-dragging { box-shadow: 0 0 0 3px var(--tk-accent-mid), var(--tk-shadow-2); }
+.tk-pad-bubble:focus-visible { outline-offset: 2px; }
+.tk-pad-hint { color: var(--tk-muted); font-size: var(--tk-fs-sm); line-height: 1.4; text-align: center; }
+
+/* Where the pad lives on the page: under the corner picker in setup, and under the live hint on the stage.
+   Each container is shown and hidden with the hidden attribute, which section 2 makes win over these rules. */
+.tk-pad-field .tk-pad { max-width: 300px; margin-inline: auto; }
+.tk-pad-field .tk-pad-hint { font-size: var(--tk-fs-xs); }
+/* The stage spaces its children far apart for the rings; the pad sits closer under the hint. */
+.tk-stage-pad { width: 100%; max-width: 420px; margin: -72px auto 0; }
+.tk-popout-btn { white-space: nowrap; }
+
+/* ============================================================ 22. Floating controls: the always-on-top bar in its own small window */
+/* The window is asked for at 300 x 64 CSS pixels and everything here fits that with no scrollbar:
+   a 12px side gutter (so the bubble map's frame is the window width minus 24, as floater.js sizes it),
+   one 48px row, and 8px above and below. The page's base styles target .tk-app, which this body does not carry. */
+html:has(> body.tk-floater) { scrollbar-gutter: auto; overflow: hidden; background: var(--tk-bg); }
+body.tk-floater {
+  margin: 0; padding: var(--tk-s2) var(--tk-s3);
+  min-height: 100vh; overflow: hidden;
+  display: flex; flex-direction: column;
+  font-family: var(--tk-font); font-size: var(--tk-fs-sm); line-height: 1.3;
+  color: var(--tk-text); background: var(--tk-bg);
+  -webkit-font-smoothing: antialiased;
+}
+/* A thin signal line across the top while recording. */
+body.tk-floater.tk-is-recording { box-shadow: 0 2px 0 var(--tk-accent) inset; }
+
+.tk-floater-view { display: flex; flex-direction: column; min-width: 0; }
+/* The finished views center in whatever height the window has; if it could not grow, they start at the top instead of clipping the title. */
+.tk-floater-processing, .tk-floater-done, .tk-floater-short, .tk-floater-failed { flex: 1; justify-content: safe center; gap: var(--tk-s1); }
+
+/* The live row: dot, timer, then the buttons pushed to the right. */
+.tk-floater-head { flex: none; display: flex; align-items: center; gap: var(--tk-s2); height: 48px; min-width: 0; }
+.tk-floater-dot { width: 10px; height: 10px; }
+.tk-floater-timer {
+  flex: none; min-width: 4ch; font-size: var(--tk-fs-md); font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+}
+.tk-is-countdown .tk-floater-timer, .tk-is-paused .tk-floater-timer { color: var(--tk-muted); }
+.tk-floater-actions { display: flex; align-items: center; gap: var(--tk-s1); min-width: 0; }
+.tk-floater-head .tk-floater-actions { flex: 1; justify-content: flex-end; margin-left: var(--tk-s1); }
+
+/* Compact buttons. Block display so a label that cannot fit ends in an ellipsis instead of pushing the row wider. */
+body.tk-floater .tk-btn {
+  display: inline-block; min-width: 0; height: 30px; min-height: 30px; padding: 0 var(--tk-s2);
+  border-radius: var(--tk-pill); font-size: var(--tk-fs-xs); line-height: 28px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Pause, Resume and Stop never shrink; "Move bubble" gives way first. */
+.tk-floater-head .tk-btn { flex: 0 0 auto; }
+.tk-floater-head .tk-floater-move { flex: 0 1 auto; }
+.tk-floater-move[aria-expanded="true"] { border-color: var(--tk-accent); color: var(--tk-text); background: var(--tk-accent-soft); }
+/* In the finished views the buttons share one row equally. */
+.tk-floater-done .tk-floater-actions .tk-btn, .tk-floater-short .tk-floater-actions .tk-btn,
+.tk-floater-failed .tk-floater-actions .tk-btn { flex: 1 1 0; }
+
+/* The bubble map, opened by "Move bubble". floater.js grows the window by the frame's height plus 40px:
+   4px above the frame, 4px between frame and hint, a 16px hint line, and spare. */
+.tk-floater-pad { flex: none; padding-top: var(--tk-s1); }
+body.tk-floater .tk-pad { gap: var(--tk-s1); }
+body.tk-floater .tk-pad-hint { font-size: var(--tk-fs-xs); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The whole-screen note: one short line in the 24px the window adds for it. The full sentence is also the row's tooltip. */
+.tk-floater-note {
+  flex: none; color: var(--tk-muted); font-size: calc(var(--tk-fs-xs) * 0.85); line-height: 16px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.tk-floater-title {
+  font-size: var(--tk-fs-sm); font-weight: 700; line-height: 1.25; text-align: center;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.tk-floater-done .tk-floater-title { font-family: var(--tk-font-display, var(--tk-font)); letter-spacing: -0.01em; }
+.tk-floater-processing .tk-floater-title { color: var(--tk-muted); font-weight: 600; }
+.tk-floater-processing .tk-floater-title::before {
+  content: ""; display: inline-block; width: 10px; height: 10px; margin-right: var(--tk-s2); vertical-align: -1px;
+  border: 2px solid var(--tk-accent); border-right-color: transparent; border-radius: 50%;
+  animation: tk-spin 800ms linear infinite;
+}
+.tk-floater-msg {
+  color: var(--tk-muted); font-size: var(--tk-fs-xs); line-height: 1.3; text-align: center; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.tk-floater-msg:empty { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  body.tk-floater .tk-floater-dot, .tk-floater-processing .tk-floater-title::before { animation: none; }
+}

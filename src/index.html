@@ -121,7 +121,7 @@
         </fieldset>
 
         <fieldset class="tk-fieldset tk-corner-group" id="tk-corners">
-          <legend class="tk-legend">Camera bubble corner</legend>
+          <legend class="tk-legend">Quick corners</legend>
           <label class="tk-corner" for="tk-corner-tl">
             <input class="tk-corner-input" type="radio" id="tk-corner-tl" name="tk-bubble-corner" value="top-left">
             <span class="tk-corner-label">Top left</span>
@@ -140,6 +140,8 @@
           </label>
         </fieldset>
 
+        <div class="tk-field tk-pad-field" id="tk-pad-field"><span class="tk-label" id="tk-pad-label">Bubble position</span><div id="tk-setup-pad" role="group" aria-labelledby="tk-pad-label"></div></div>
+
         <p class="tk-note" id="tk-setup-note" hidden></p>
       </form>
 
@@ -154,7 +156,8 @@
           <span class="tk-record-label" id="tk-record-label">Record</span>
         </button>
         <p class="tk-record-hint" id="tk-record-hint">Your browser asks what to share. Recording starts after a 3-second countdown.</p>
-        <p class="tk-record-hint" id="tk-record-live" role="status" hidden>Recording. Switch to what you want to show. Come back to this tab, or use your browser's Stop sharing bar, to finish.</p>
+        <p class="tk-record-hint" id="tk-record-live" role="status" hidden>Recording. Use the floating controls, or come back to this tab, to pause or stop.</p>
+        <div class="tk-stage-pad" id="tk-stage-pad" hidden></div>
 
         <div class="tk-countdown" id="tk-countdown" role="status" aria-live="assertive" hidden>
           <span class="tk-sr-only">Recording starts in</span>
@@ -171,6 +174,7 @@
     <span class="tk-recbar-status" id="tk-rec-status" role="status" aria-live="polite">Recording</span>
     <span class="tk-recbar-timer" id="tk-rec-timer" role="timer" aria-label="Recording time">0:00</span>
     <div class="tk-recbar-actions" id="tk-recbar-actions">
+      <button type="button" class="tk-btn tk-popout-btn" id="tk-popout-btn" hidden>Pop out controls</button>
       <button type="button" class="tk-btn" id="tk-pause-btn">Pause</button>
       <button type="button" class="tk-btn" id="tk-resume-btn" hidden>Resume</button>
       <button type="button" class="tk-btn tk-btn-primary" id="tk-stop-btn">Stop</button>
@@ -363,6 +367,9 @@
           <li>Captions show on the video here and save as a separate .vtt file. To draw them into the video too, tick &quot;Burn captions into the video&quot; under Save options.</li>
           <li>The camera bubble can show a video file you choose in place of your live camera.</li>
           <li>The camera bubble can be a circle or a rectangle.</li>
+          <li>Stop, Pause and Download float on top of your other windows while you record (Chrome and Edge).</li>
+          <li>Drag the camera bubble anywhere, before or during a recording.</li>
+          <li>If you share your whole screen, the floating controls show in the video. Share a window or tab to keep them out.</li>
           <li>The transcript can be searched, copied and saved as text or subtitles.</li>
           <li>When you save, you can burn the captions into the video and choose a tall 9:16 shape for social posts.</li>
           <li>The cloud folder gives you a file. You make the share link in Google Drive, OneDrive, Dropbox or iCloud.</li>

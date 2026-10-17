@@ -12,7 +12,9 @@ There is no account to make and nothing to install.
 ## What it does
 
 - Records your screen, your microphone and a camera bubble, with pause and stop.
-- The bubble can be a circle or a rectangle, in any corner.
+- Stop, Pause and Download float on top of your other windows while you record.
+- The bubble can be a circle or a rectangle, anywhere on the screen.
+- Drag the camera bubble anywhere, before or during a recording.
 - The bubble can play a video file in place of the live camera.
 - Real webcams are preferred over virtual cameras automatically.
 - Trims both ends and cuts out a middle section, and the saved file matches.
@@ -27,6 +29,7 @@ There is no account to make and nothing to install.
 
 - No hosted share links, view counts or comments.
 - Chrome and Edge only.
+- If you share your whole screen, the floating controls show in the video.
 - Not tested on a Mac.
 - Captions are English only, and they download about 50 to 70 MB of tools from free public download servers when you use them.
 - Trimmed, cut, burned or vertical saves need the internet for the editing tool, and take a few seconds per minute of video.
@@ -44,7 +47,7 @@ There are no accounts, no cookies and no tracking.
 
 Many source files in, one file out.
 `node build.mjs` joins `src/` into `dist/takes.html`.
-`node --test` runs the unit tests (236).
+`node --test` runs the unit tests (331).
 There are no dependencies to install.
 It needs Node 22 or newer.
 
